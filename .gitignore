@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.npm-cache/
+server/*.sqlite*
+.local-archive/
+.wrangler/
+__pycache__/

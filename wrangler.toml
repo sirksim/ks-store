@@ -1,0 +1,15 @@
+name = "ks-local"
+compatibility_date = "2026-10-26"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ks-local"
+database_id = "2c39a504-7e63-4a3f-9d47-cdbdf683064f"
+preview_database_id = "DB"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "ks-local-images"
+
+[vars]
+ALLOW_LOCAL_AUTH = "1"

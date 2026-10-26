@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --ks-navy: #14283c;
+  --ks-navy-light: #19394d;
+  --ks-gold: #cba97d;
+  --ks-gold-dark: #b18459;
+  --ks-page: #f5f7f8;
+  --ks-surface: #fff;
+  --ks-border: #e7ecef;
+  --ks-text: #203042;
+  --ks-muted: #8191a0;
+  --ks-font-body: 'DM Sans', system-ui, sans-serif;
+  --ks-font-heading: Manrope, system-ui, sans-serif;
+}

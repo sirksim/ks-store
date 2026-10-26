@@ -1,0 +1,19 @@
+.document-page{display:grid;gap:18px}
+.document-page .product-back{justify-self:start}
+.document-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.document-facts>div{border:1px solid #e5ecef;background:#f8fbfb;border-radius:9px;padding:15px;min-width:0}
+.document-facts span,.document-facts strong{display:block}
+.document-facts span{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#8a9caa;font-weight:800}
+.document-facts strong{font-size:15px;margin-top:6px;overflow-wrap:anywhere}
+.document-note{margin:16px 0 0;overflow-wrap:anywhere}
+.document-line{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-top:1px solid #e5ecef;padding:15px 0}
+.document-line strong,.document-line small{display:block}
+.document-line small{margin-top:4px;color:#738b99}
+.document-line-values{display:grid;gap:4px;text-align:right}
+.document-variance{color:#a15f2b!important}
+.document-total{display:flex;justify-content:space-between;gap:16px;border-top:1px solid #e5ecef;padding-top:15px;font-weight:700}
+@media(max-width:600px){.document-facts{grid-template-columns:1fr}.document-line{flex-direction:column;gap:8px}.document-line-values{text-align:left}.document-page .entry-actions{width:100%;flex-wrap:wrap}}
+.share-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.share-actions input{max-width:260px;padding:8px;border:1px solid #dce6e9;border-radius:7px}.share-actions small{color:#a33}
+.sync-banner{background:#fff4df;color:#73522b;border:1px solid #f0dfbb;border-radius:9px;padding:10px 14px;margin-bottom:16px;font-size:12px;font-weight:700}
+.sync-overlay{position:fixed;inset:0;background:#14283c99;z-index:1000;display:grid;place-items:center;padding:20px}.sync-panel{width:min(760px,100%);max-height:90vh;overflow:auto}.sync-panel h2{margin:8px 0}.sync-panel>.secondary{margin-top:18px}.sync-conflict{border-top:1px solid #dce6e9;margin-top:15px;padding-top:15px}.sync-versions{display:grid;grid-template-columns:1fr 1fr;gap:12px}.sync-versions>div{min-width:0}.sync-versions pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;background:#f5f9fa;padding:10px;font-size:11px}.sync-conflict .entry-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:600px){.sync-versions{grid-template-columns:1fr}.share-actions input{max-width:100%}}

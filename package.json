@@ -1,0 +1,25 @@
+{
+  "name": "ks-gestion",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": ">=24.15.0" },
+  "scripts": {
+    "dev": "npm run build && wrangler pages dev dist",
+    "db:local:init": "wrangler d1 execute ks-local --local --file=migrations/0001_initial.sql",
+    "prebuild": "node scripts/prepare-build.js",
+    "build": "esbuild src/main.jsx src/public.jsx --bundle --minify --format=esm --target=es2020 --loader:.jsx=jsx --outdir=dist/assets --entry-names=[name] && esbuild server/worker.js --bundle --minify --format=esm --target=es2022 --platform=browser --outfile=dist/_worker.js",
+    "postbuild": "node scripts/finalize-build.js",
+    "test": "node src/all.test.js"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "9.3.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,14 @@
+import { money, productName } from '../src/data.js'
+
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+
+export function renderDocument({ kind, document }) {
+  const isInvoice = kind === 'invoice'
+  const title = isInvoice ? `Facture ${document.number || 'Sans numéro'}` : `PO ${document.number}`
+  const supplier = isInvoice ? document.supplier || 'Non précisé' : document.supplier?.name || 'Non précisé'
+  const rows = isInvoice ? document.lines.map(line => `<tr><td>${escapeHtml(line.product ? productName(line.product) : line.productCode)}</td><td>${escapeHtml(line.cases)}</td><td>${escapeHtml(money(line.casePrice))}</td><td>${escapeHtml(money(line.cost))}</td></tr>`).join('')
+    : document.lines.map(line => `<tr><td>${escapeHtml(line.product ? productName(line.product) : line.productCode)}</td><td>${escapeHtml(line.cases)} prévues · ${escapeHtml(line.receivedCases)} reçues · ${escapeHtml(line.remainingCases)} restantes</td><td>${escapeHtml(money(line.casePrice))}</td><td>${escapeHtml(money(Number(line.cases) * Number(line.casePrice)))}</td></tr>`).join('')
+  const total = isInvoice ? document.total : document.plannedTotal
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>${escapeHtml(title)} · KS</title><style>body{font:15px system-ui,sans-serif;color:#19394d;max-width:900px;margin:30px auto;padding:0 18px}h1{font-size:27px}header{border-bottom:2px solid #19394d;padding-bottom:18px;margin-bottom:20px}small{color:#6c8290}table{border-collapse:collapse;width:100%;margin-top:20px}th,td{text-align:left;border-bottom:1px solid #dce6e9;padding:12px 8px}th{background:#f5f9fa}.total{text-align:right;font-weight:700;margin-top:18px}.note{white-space:pre-wrap} @media(max-width:600px){table{font-size:12px}th,td{padding:8px 3px}}</style></head><body><header><small>KS · Document partagé en lecture seule</small><h1>${escapeHtml(title)}</h1><p>${escapeHtml(document.date)} · Fournisseur : ${escapeHtml(supplier)}${isInvoice ? '' : ` · ${escapeHtml(document.status)}`}</p></header>${document.note ? `<p class="note"><strong>Notes :</strong> ${escapeHtml(document.note)}</p>` : ''}<table><thead><tr><th>Produit</th><th>Caisses</th><th>Prix/caisse</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><p class="total">${isInvoice ? 'Total facture' : 'Total prévu'} : ${escapeHtml(money(total))}</p></body></html>`
+}

@@ -1,0 +1,7 @@
+import './data.test.js'
+import './table.test.js'
+import './routes.test.js'
+import './documentWorkflow.test.js'
+import './syncCore.test.js'
+import '../server/d1Store.test.js'
+import '../server/worker.test.js'
