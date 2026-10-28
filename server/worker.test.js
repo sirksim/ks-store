@@ -57,7 +57,10 @@ test('Pages API starts empty, publishes a product, restores JSON and resets to e
     assert.equal((await change('products', product.code, product)).status, 200)
     assert.deepEqual((await (await call('/api/catalog')).json()).products, [])
     assert.equal((await change('products', product.code, { ...product, published: true }, 1)).status, 200)
-    assert.equal((await (await call('/api/catalog')).json()).products.length, 1)
+    const [publicProduct] = (await (await call('/api/catalog')).json()).products
+    assert.equal(publicProduct.suggestedPrice, 0)
+    assert.equal(Object.hasOwn(publicProduct, 'unitCost'), false)
+    assert.equal(Object.hasOwn(publicProduct, 'purchaseCost'), false)
     assert.equal((await call(upload.url)).status, 200)
     const snapshot = await (await call('/admin/api/snapshot')).json()
     assert.equal(snapshot.state.products.length, 1)

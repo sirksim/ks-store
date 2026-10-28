@@ -50,3 +50,13 @@ test('v9 pagination keeps selected rows from another page', () => {
   assert.deepEqual(table.getSelectedRowModel().rows.map(row => row.id), ['c'])
   assert.equal(table.getPageCount(), 2)
 })
+
+test('multi-value filters match any selected value and combine across columns', () => {
+  const table = renderTable({ columnFilters: [
+    { id: 'supplier', value: ['Alpha', 'Beta'] },
+    { id: 'total', value: ['100', '300'] },
+  ] })
+  assert.deepEqual(table.getFilteredRowModel().rows.map(row => row.id), ['a', 'b'])
+  assert.deepEqual(renderTable({ columnFilters: [{ id: 'supplier', value: [] }] })
+    .getFilteredRowModel().rows.map(row => row.id), ['a', 'b', 'c'])
+})

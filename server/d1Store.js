@@ -129,8 +129,9 @@ export function createD1Store(db) {
   const publicCatalog = async () => {
     const state = stateFromRows(await rows(['families', 'products', 'invoices', 'sales', 'settings'])).state
     return derive(state).products.filter(row => row.published === true).map(row => ({
-      code: row.code, name: row.name, category: row.product, volume: row.format,
+      code: row.code, name: row.name, shortName: row.shortName, category: row.product, volume: row.format,
       variant: row.variant, picture: row.picture || null, available: row.stock > 0,
+      suggestedPrice: row.suggestedPrice,
     }))
   }
   return { snapshot, replace, apply, changesSince, shareStatus, createShare, revokeShare, sharedDocument, publicCatalog }

@@ -1,3 +1,5 @@
+import { generateProductCode } from './data.js'
+
 export function orderStageForAction(previousStage, action, hasReceipts = false) {
   if (action === 'save' && (previousStage === 'draft' || previousStage === 'ordered')) return previousStage
   if (action === 'command' && previousStage === 'draft') return 'ordered'
@@ -27,18 +29,18 @@ export function prepareInlineProduct(values, families, catalog, makeId) {
   const variantName = String(values.variant || '').trim()
   const code = String(values.code || '').trim().toUpperCase()
   const unitsPerCase = Number(values.unitsPerCase)
-  if (!name || !volume || !category || !code) throw new Error('Renseigne le nom, le volume, la catégorie et le code.')
+  if (!name || !volume || !category) throw new Error('Renseigne le nom, le volume et la catégorie.')
   if (!Number.isInteger(unitsPerCase) || unitsPerCase < 1) throw new Error('Les unités par caisse doivent être un entier positif.')
-  const key = [name, volume, category].map(value => value.toLocaleLowerCase('fr')).join('|')
-  if (families.some(row => [row.name, row.volume, row.category].map(value => value.toLocaleLowerCase('fr')).join('|') === key))
+  const key = [name, category].map(value => value.toLocaleLowerCase('fr')).join('|')
+  if (families.some(row => [row.name, row.category].map(value => value.toLocaleLowerCase('fr')).join('|') === key))
     throw new Error('Cette fiche existe déjà. Choisis sa variante dans le catalogue.')
   if (catalog.some(row => row.code.toLocaleLowerCase('fr') === code.toLocaleLowerCase('fr')))
     throw new Error('Ce code produit existe déjà.')
-  const fullName = [name, category, variantName, volume].filter(Boolean).join(' ').toLocaleLowerCase('fr')
-  if (catalog.some(row => [row.brand, row.product, row.variant, row.format].filter(Boolean).join(' ').toLocaleLowerCase('fr') === fullName))
+  const fullName = [name, variantName, volume].filter(Boolean).join(' ').toLocaleLowerCase('fr')
+  if (catalog.some(row => [row.brand, row.variant, row.format].filter(Boolean).join(' ').toLocaleLowerCase('fr') === fullName))
     throw new Error('Ce nom complet existe déjà.')
-  const family = { id: makeId(), name, volume, category }
-  const variant = { familyId: family.id, code, variant: variantName, unitsPerCase, margin: null,
+  const family = { id: makeId(), name, category }
+  const variant = { familyId: family.id, code: code || generateProductCode(category, catalog), variant: variantName, format: volume, unitsPerCase, margin: null,
     picture: null, published: false }
   return { family, variant }
 }

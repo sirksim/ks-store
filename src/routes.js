@@ -42,8 +42,12 @@ export function readTableQuery(search, columns, initialSort = []) {
     .map(column => column.id || column.accessorKey))
   const sortable = new Set(columns.filter(column => (column.accessorKey || column.accessorFn) && column.enableSorting !== false)
     .map(column => column.id || column.accessorKey))
-  const columnFilters = [...params].filter(([key, value]) => key.startsWith('filter.') && value && filterable.has(key.slice(7)))
-    .map(([key, value]) => ({ id: key.slice(7), value }))
+  const groupedFilters = new Map()
+  for (const [key, value] of params) if (key.startsWith('filter.') && value && filterable.has(key.slice(7))) {
+    const id = key.slice(7)
+    groupedFilters.set(id, [...(groupedFilters.get(id) || []), value])
+  }
+  const columnFilters = [...groupedFilters].map(([id, values]) => ({ id, value: values.length === 1 ? values[0] : values }))
   const hidden = params.getAll('hide').filter(id => filterable.has(id))
   const visibleData = [...filterable].filter(id => !hidden.includes(id))
   const columnVisibility = visibleData.length ? Object.fromEntries(hidden.map(id => [id, false])) : {}
@@ -63,7 +67,8 @@ export function writeTableQuery(search, state) {
   const params = new URLSearchParams(search)
   for (const key of [...params.keys()]) if (key === 'q' || key === 'sort' || key === 'hide' || key === 'page' || key.startsWith('filter.')) params.delete(key)
   if (state.globalFilter) params.set('q', state.globalFilter)
-  for (const filter of state.columnFilters) if (filter.value) params.append(`filter.${filter.id}`, String(filter.value))
+  for (const filter of state.columnFilters) for (const value of Array.isArray(filter.value) ? filter.value : [filter.value])
+    if (value) params.append(`filter.${filter.id}`, String(value))
   for (const sort of state.sorting) params.append('sort', `${sort.id}:${sort.desc ? 'desc' : 'asc'}`)
   for (const [id, visible] of Object.entries(state.columnVisibility)) if (!visible) params.append('hide', id)
   if (state.pagination.pageIndex > 0) params.set('page', String(state.pagination.pageIndex + 1))

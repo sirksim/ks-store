@@ -10,6 +10,8 @@ export const encodeCsv = rows => '\uFEFF' + rows.map(row => row.map(escapeCell).
 
 const selectedCell = (kind, item, id) => {
   if (id === 'lineCount') return item.lines.length
+  if (id === 'publicationStatus') return item.published ? 'Publié' : 'Non publié'
+  if (id === 'publishedCount') return item.variants.filter(variant => variant.published).length
   if (id === 'productName' && kind === 'ventes') return item.product ? productName(item.product) : item.productCode
   if (id === 'supplierName') return item.supplier?.name || ''
   if (id === 'variance') return item.hasVariance ? 'Écart' : ''
@@ -22,9 +24,9 @@ export function selectedTableRows(kind, items, visibleColumns) {
   const values = item => visibleColumns.map(column => selectedCell(kind, item, column.id))
   if (kind === 'produits') {
     return [
-      [...headers, 'Code variante', 'Variante', 'Unités/caisse', 'Coût moyen/caisse (G)', 'Coût moyen/unité (G)', 'Marge cible (%)', 'Prix conseillé (G)', 'Stock'],
+      [...headers, 'Code variante', 'Variante', 'Volume', 'Unités/caisse', 'Coût moyen/caisse (G)', 'Coût moyen/unité (G)', 'Marge cible (%)', 'Prix conseillé (G)', 'Stock'],
       ...items.flatMap(family => family.variants.map(variant => [
-        ...values(family), variant.code, variant.variant, variant.unitsPerCase,
+        ...values(family), variant.code, variant.variant, variant.format, variant.unitsPerCase,
         decimal(variant.casePrice), decimal(variant.cogAvgPrice), decimal(variant.targetMargin),
         decimal(variant.suggestedPrice), variant.stock,
       ])),
