@@ -44,7 +44,7 @@ function ProductCard({ product, index }) {
       <h4>{product.shortName || product.name}</h4>
       <div className="card-bottom">
         <div className="card-meta"><span>{product.volume || 'Format non précisé'}</span><span>Réf. {product.code}</span></div>
-        <span className="card-price"><small>Prix conseillé</small><strong>{suggestedPriceLabel(product.suggestedPrice)}</strong></span>
+        <strong className="card-price">{suggestedPriceLabel(product.suggestedPrice)}</strong>
       </div>
       <StockBadge available={product.available}/>
     </div>
