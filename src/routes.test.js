@@ -38,3 +38,15 @@ test('invalid columns and page are ignored while one data column stays visible',
   assert.deepEqual(state.sorting, [])
   assert.equal(state.pagination.pageIndex, 0)
 })
+
+test('multiple filter values round trip and older single-value links remain readable', () => {
+  const columns = [{ accessorKey: 'category' }, { accessorKey: 'status' }]
+  const state = readTableQuery('?filter.category=Vin&filter.category=Rhum&filter.status=En%20attente', columns)
+  assert.deepEqual(state.columnFilters, [
+    { id: 'category', value: ['Vin', 'Rhum'] },
+    { id: 'status', value: 'En attente' },
+  ])
+  const restored = readTableQuery(`?${writeTableQuery('', state)}`, columns)
+  assert.deepEqual(restored.columnFilters, state.columnFilters)
+  assert.deepEqual(readTableQuery('?filter.category=Vin', columns).columnFilters, [{ id: 'category', value: 'Vin' }])
+})

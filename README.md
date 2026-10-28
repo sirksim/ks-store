@@ -14,6 +14,8 @@ npm run dev
 
 Ouvrir `http://localhost:8788/` pour la vitrine et `http://localhost:8788/admin/` pour la gestion. `npm run dev` construit `dist/` puis démarre Cloudflare Pages en local avec les liaisons `DB` et `IMAGES` déclarées dans `wrangler.toml`. La base et les images locales sont conservées dans `.wrangler/state/`. La commande `db:local:init` applique le schéma de façon répétable ; elle ne supprime pas les données existantes. La variable `ALLOW_LOCAL_AUTH` donne accès à la gestion uniquement sur `localhost` et `127.0.0.1` pendant ce développement local. [Documentation Pages locale](https://developers.cloudflare.com/pages/functions/local-development/) et [D1 locale](https://developers.cloudflare.com/d1/best-practices/local-development/).
 
+Pour importer le jeu d’essai dans D1 local, utiliser `node scripts/import-local-products.js --dry-run`, puis `node scripts/import-local-products.js`. Le CSV contient `family_name,category,variant,volume,units_per_case` et peut ajouter une colonne `code` facultative. Le script conserve les codes déjà attribués, regroupe les familles et sauvegarde la base dans `.local-archive/` avant toute modification. Les nouvelles variantes restent non publiées.
+
 ## Cloudflare Pages
 
 `npm run build` produit `dist/`, dont le Worker Pages. Pour un déploiement Git Pages, choisir **Build command** `npm run build` et **Build output directory** `dist`. `.node-version` fixe Node.js 24.15.0. Le fichier `wrangler.toml` sert au développement local ; il ne contient pas de répertoire de déploiement Pages. Configurer les liaisons et variables de production dans le tableau de bord Pages.
@@ -23,11 +25,11 @@ Ouvrir `http://localhost:8788/` pour la vitrine et `http://localhost:8788/admin/
 3. Protéger `ks.sirksim.xyz/admin/*` par Cloudflare Access. Ajouter dans Pages **`ACCESS_TEAM_DOMAIN`** et **`ACCESS_AUD`** correspondant à l’application Access. Sans ces variables, les routes de gestion refusent l’accès.
 4. Associer le domaine public à Pages, puis vérifier la vitrine, la gestion, une publication de produit et une image.
 
-Seules les variantes marquées **Publier cette variante sur la vitrine** sont visibles. Le catalogue public ne transmet ni prix, ni coût, ni quantité, ni facture, ni contact. Les données déjà présentes dans D1 restent en place pendant ce nettoyage.
+Dans **Produits → Publication**, publier une variante directement ou sélectionner plusieurs variantes pour les publier ou les retirer de la vitrine. Les nouvelles variantes restent non publiées. L’API du catalogue public transmet le prix conseillé calculé, mais aucun coût d’achat, quantité, facture ou contact. Les données déjà présentes dans D1 restent en place pendant ce nettoyage.
 
 ## Données et sauvegardes
 
-Les modifications hors connexion restent dans le navigateur et se synchronisent à la reconnexion. Si deux appareils modifient le même élément, la gestion demande de choisir une version. Dans **Rapports**, télécharger régulièrement une sauvegarde JSON. Seul le format JSON courant peut être restauré. **Réinitialiser les données** remplace les données communes par un catalogue vide et les paramètres par défaut. Les rapports peuvent aussi être exportés en CSV UTF-8 à séparateur point-virgule.
+Les modifications hors connexion restent dans le navigateur et se synchronisent à la reconnexion. Si deux appareils modifient le même élément, la gestion demande de choisir une version. Dans **Rapports**, télécharger régulièrement une sauvegarde JSON. Les sauvegardes avec le volume sur la fiche produit sont mises à niveau lors de la restauration. **Réinitialiser les données** remplace les données communes par un catalogue vide et les paramètres par défaut. Les rapports peuvent aussi être exportés en CSV UTF-8 à séparateur point-virgule.
 
 Les fichiers de travail et les trois fichiers SQLite conservés avant ce nettoyage se trouvent dans `.local-archive/`, exclu de Git. Les anciennes données du navigateur ne sont pas reprises sous les nouvelles clés KS.
 

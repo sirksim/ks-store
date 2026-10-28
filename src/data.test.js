@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { STORAGE_KEY, catalogProducts, cloneInitial, derive, findProduct, loadState, nextPurchaseOrderNumber, normalizeState } from './data.js'
+import { STORAGE_KEY, catalogProducts, cloneInitial, derive, findProduct, generateProductCode, loadState, nextPurchaseOrderNumber, normalizeState, productCodePrefix } from './data.js'
 import { encodeCsv, reportRows, selectedTableRows } from './csv.js'
 import { updateFilteredSelection } from './tableSelection.js'
 
@@ -24,11 +24,11 @@ test('new installation and reset start with an empty catalogue and default setti
 test('only the current KS storage key and backup format are read', () => {
   const state = sampleState()
   assert.equal(STORAGE_KEY, 'ks-gestion-v1')
-  assert.deepEqual(loadState({ getItem: key => key === STORAGE_KEY ? JSON.stringify(state) : null }), state)
+  assert.deepEqual(loadState({ getItem: key => key === STORAGE_KEY ? JSON.stringify(state) : null }), normalizeState(state))
   const readKeys = []
   assert.deepEqual(loadState({ getItem: key => { readKeys.push(key); return null } }), cloneInitial())
   assert.deepEqual(readKeys, [STORAGE_KEY])
-  assert.strictEqual(normalizeState(state), state)
+  assert.equal(normalizeState(state).products[0].format, '75 cl')
   const { families, ...old } = state
   assert.equal(normalizeState(old), null)
   assert.equal(normalizeState({ ...state, receipts: [] }), null)
@@ -64,11 +64,37 @@ test('CSV escapes values and selected rows respect visible columns', () => {
   const state = sampleState()
   state.families[0].name = '=Formula'
   const rows = selectedTableRows('produits', derive(state).families, [
-    { id: 'volume', header: 'Volume' }, { id: 'name', header: 'Produit' },
+    { id: 'category', header: 'Catégorie' }, { id: 'name', header: 'Produit' },
   ])
-  assert.deepEqual(rows[0].slice(0, 2), ['Volume', 'Produit'])
+  assert.deepEqual(rows[0].slice(0, 2), ['Catégorie', 'Produit'])
+  assert.ok(rows[0].includes('Volume'))
   assert.ok(encodeCsv(rows).includes(";'=Formula"))
+  assert.deepEqual(selectedTableRows('catalogVariants', [{ code: 'V1', published: true }],
+    [{ id: 'code', header: 'Code' }, { id: 'publicationStatus', header: 'Vitrine' }])[1], ['V1', 'Publié'])
   assert.ok(encodeCsv([['Nom'], ['Client; A']]).includes('"Client; A"'))
+})
+
+test('legacy size families merge while variants keep codes and formats', () => {
+  const state = cloneInitial()
+  state.families.push(
+    { id: 'a', name: 'Three Sisters Vodka', category: 'Vodka', volume: '375ml' },
+    { id: 'b', name: 'Three Sisters Vodka', category: 'Vodka', volume: '200ml' },
+  )
+  state.products.push(
+    { code: 'VOD-1', familyId: 'a', variant: 'Citrus', unitsPerCase: 12 },
+    { code: 'VOD-2', familyId: 'b', variant: 'Raspberry', unitsPerCase: 24 },
+  )
+  const upgraded = normalizeState(state)
+  assert.equal(upgraded.families.length, 1)
+  assert.deepEqual(upgraded.products.map(row => [row.code, row.familyId, row.format]),
+    [['VOD-1', 'a', '375ml'], ['VOD-2', 'a', '200ml']])
+  assert.equal(derive(upgraded).products[0].name, 'Three Sisters Vodka Citrus 375ml')
+  assert.equal(normalizeState(upgraded).families.length, 1)
+  const secondSize = structuredClone(upgraded)
+  secondSize.products.push({ code: 'VOD-3', familyId: 'a', variant: 'Citrus', format: '1L', unitsPerCase: 12 })
+  assert.ok(normalizeState(secondSize))
+  secondSize.products.at(-1).format = '375ml'
+  assert.equal(normalizeState(secondSize), null)
 })
 
 test('purchase order numbers and filtered selection remain stable', () => {
@@ -76,4 +102,15 @@ test('purchase order numbers and filtered selection remain stable', () => {
   const selected = updateFilteredSelection({ other: true }, [{ id: 'one' }, { id: 'two' }], true)
   assert.deepEqual(selected, { other: true, one: true, two: true })
   assert.deepEqual(updateFilteredSelection(selected, [{ id: 'one' }, { id: 'two' }], false), { other: true })
+})
+
+test('product references use the category and retry local collisions', () => {
+  assert.equal(productCodePrefix('Épicerie fine'), 'EPI')
+  assert.equal(productCodePrefix('Vin'), 'VIN')
+  assert.equal(productCodePrefix('Bi'), 'BI')
+  assert.equal(generateProductCode('', []), '')
+  let attempt = 0
+  const fillRandom = bytes => bytes.fill(attempt++)
+  assert.equal(generateProductCode('Beverage', [{ code: 'bev-aaaaaaaa' }], fillRandom), 'BEV-BBBBBBBB')
+  assert.equal(attempt, 2)
 })

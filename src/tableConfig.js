@@ -14,7 +14,9 @@ export const dataTableFeatures = tableFeatures({
 })
 
 export const textColumnFilter = (row, id, value) =>
-  String(row.getValue(id) ?? '').toLocaleLowerCase('fr').includes(String(value).toLocaleLowerCase('fr'))
+  Array.isArray(value)
+    ? !value.length || value.includes(String(row.getValue(id) ?? ''))
+    : String(row.getValue(id) ?? '').toLocaleLowerCase('fr').includes(String(value).toLocaleLowerCase('fr'))
 
 export const searchAcrossRow = (row, _id, value) => {
   const query = String(value).toLocaleLowerCase('fr')

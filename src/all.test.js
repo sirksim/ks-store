@@ -1,5 +1,8 @@
 import './data.test.js'
 import './table.test.js'
+import './catalogTable.test.js'
+import './filterModel.test.js'
+import './publication.test.js'
 import './routes.test.js'
 import './documentWorkflow.test.js'
 import './syncCore.test.js'

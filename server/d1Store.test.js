@@ -49,6 +49,7 @@ test('D1 starts empty, publishes only selected variants, and derives stock from 
     assert.deepEqual(await store.apply(publish), await store.apply(publish))
     assert.equal((await apply('products', product.code, product, 1)).conflict, true)
     assert.equal((await store.publicCatalog())[0].available, false)
+    assert.equal((await store.publicCatalog())[0].suggestedPrice, 0)
     await apply('invoices', 'invoice-1', { id: 'invoice-1', date: '2026-10-26', supplierId: null,
       purchaseOrderId: null, lines: [{ id: 'line-1', productCode: 'VIN-1', cases: 1, casePrice: 100 }] })
     assert.equal((await store.publicCatalog())[0].available, true)
@@ -57,8 +58,14 @@ test('D1 starts empty, publishes only selected variants, and derives stock from 
     const publicProduct = (await store.publicCatalog())[0]
     assert.equal(publicProduct.available, false)
     assert.equal(publicProduct.picture, 'a-picture.jpg')
-    assert.equal(Object.hasOwn(publicProduct, 'stock'), false)
-    assert.equal(Object.hasOwn(publicProduct, 'unitCost'), false)
+    assert.equal(publicProduct.suggestedPrice, 25)
+    assert.equal(publicProduct.name, 'Maison Rouge 75 cl')
+    assert.equal(publicProduct.shortName, 'Maison Rouge')
+    assert.equal(publicProduct.volume, '75 cl')
+    assert.deepEqual(Object.keys(publicProduct).sort(), ['available', 'category', 'code', 'name', 'picture', 'shortName', 'suggestedPrice', 'variant', 'volume'])
+    product.published = false
+    assert.equal((await apply('products', product.code, product, 2)).conflict, false)
+    assert.deepEqual(await store.publicCatalog(), [])
   } finally { db.close() }
 })
 

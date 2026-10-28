@@ -15,22 +15,62 @@ export const initialState = {
 
 export const cloneInitial = () => structuredClone(initialState)
 export const uid = () => globalThis.crypto?.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(36).slice(2)}`
-export const productName = product => [product.brand, product.product, product.variant, product.format].filter(Boolean).join(' ')
-export const shortName = product => [product.brand, product.product, product.variant].filter(Boolean).join(' ')
+export const productName = product => [product.brand, product.variant, product.format].filter(Boolean).join(' ')
+export const shortName = product => [product.brand, product.variant].filter(Boolean).join(' ')
+
+const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+export const productCodePrefix = category => String(category || '').normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
+
+export function generateProductCode(category, products, fillRandom = bytes => globalThis.crypto.getRandomValues(bytes)) {
+  const prefix = productCodePrefix(category)
+  if (!prefix) return ''
+  const used = new Set(products.map(product => product.code.toUpperCase()))
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const bytes = new Uint8Array(8)
+    fillRandom(bytes)
+    const code = `${prefix}-${[...bytes].map(byte => codeAlphabet[byte & 31]).join('')}`
+    if (!used.has(code)) return code
+  }
+  throw new Error('Impossible de créer un code produit unique.')
+}
 
 export function catalogProducts(state) {
   const families = new Map((state.families || []).map(family => [family.id, family]))
   return (state.products || []).map(variant => {
     const family = families.get(variant.familyId)
     return { ...variant, brand: family?.name || '', product: family?.category || '',
-      format: family?.volume || '' }
+      format: variant.format || family?.volume || '' }
   })
 }
 
 export function findProduct(products, query) {
   const key = searchKey(query)
   if (!key) return null
-  return products.find(product => searchKey(product.code) === key || searchKey(productName(product)) === key) || null
+  return products.find(product => searchKey(product.code) === key || searchKey(productName(product)) === key ||
+    searchKey([product.brand, product.product, product.variant, product.format].filter(Boolean).join(' ')) === key) || null
+}
+
+export function upgradeProductFamilies(state) {
+  const identities = new Map()
+  const familyIds = new Map()
+  const legacySizes = new Map()
+  const families = []
+  for (const family of state.families) {
+    const identity = [family.name, family.category].map(searchKey).join('|')
+    const canonical = identities.get(identity)
+    familyIds.set(family.id, canonical?.id || family.id)
+    legacySizes.set(family.id, family.volume || '')
+    if (!canonical) {
+      const { volume, ...rest } = family
+      identities.set(identity, rest)
+      families.push(rest)
+    }
+  }
+  const products = state.products.map(product => ({ ...product,
+    familyId: familyIds.get(product.familyId) || product.familyId,
+    format: product.format || legacySizes.get(product.familyId) || '' }))
+  return { ...state, families, products }
 }
 
 const collections = ['families', 'products', 'invoices', 'suppliers', 'customers', 'purchaseOrders', 'sales', 'expenses']
@@ -59,7 +99,10 @@ export function normalizeState(saved) {
       row.lines.some(line => !object(line) || !identifier(line.id) || !products.has(line.productCode))) ||
     saved.sales.some(row => !Object.hasOwn(row, 'customerId') || !products.has(row.productCode) ||
       (row.customerId && !customers.has(row.customerId)))) return null
-  return saved
+  const upgraded = upgradeProductFamilies(saved)
+  const variantKeys = upgraded.products.map(product => [product.familyId, searchKey(product.variant), searchKey(product.format)].join('|'))
+  if (upgraded.products.some(product => !identifier(product.format)) || new Set(variantKeys).size !== variantKeys.length) return null
+  return upgraded
 }
 
 export function loadState(storage = globalThis.localStorage) {
