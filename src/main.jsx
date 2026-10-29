@@ -46,6 +46,9 @@ import {
   normalizeState,
   percent,
   nextPurchaseOrderNumber,
+  nextSaleNumber,
+  saleNumber,
+  saleLines,
   productName,
   uid,
 } from "./data";
@@ -76,6 +79,7 @@ import { selectedRows, updatePublication } from "./publication";
 import {
   hasLinkedReceipts,
   orderStageForAction,
+  saleStatusForAction,
   prepareInlineProduct,
   prepareInlineSupplier,
 } from "./documentWorkflow";
@@ -100,6 +104,7 @@ const navItems = [
   ["expenses", "Dépenses", Receipt],
   ["reports", "Rapports", Download],
 ];
+const saleStatusLabel = (status) => ({ "En attente": "Brouillon", "Confirmée/Vendue": "Vendue", "Annulée": "Annulée" })[status] || status;
 const reportTypes = [
   ["synthese", "Synthèse", "Indicateurs du tableau de bord"],
   ["ventes", "Ventes", "Transactions et marges réelles"],
@@ -157,12 +162,11 @@ const defaults = {
   },
   sale: {
     date: today(),
+    number: "",
     order: "",
     customerId: "",
     client: "",
-    search: "",
-    quantity: 1,
-    unitPrice: "",
+    lines: [],
     status: "En attente",
     payment: "",
     note: "",
@@ -199,8 +203,9 @@ function App() {
   const selectedContactId =
     page === "supplierDetail" || page === "customerDetail" ? route.id : null;
   const selectedInvoiceId = page === "invoiceDetail" ? route.id : null;
+  const selectedSaleId = page === "saleDetail" ? route.id : null;
   const selectedOrderId = page === "orderDetail" ? route.id : null;
-  const editingDocument = page === "orderEditor" || page === "invoiceEditor";
+  const editingDocument = page === "orderEditor" || page === "invoiceEditor" || page === "saleEditor";
   const [contactReturnPage, setContactReturnPage] = useState(null);
   const previousPage = window.history.state?.previous
     ? parseRoute(
@@ -208,6 +213,8 @@ function App() {
       ).page
     : null;
   const [printOrderId, setPrintOrderId] = useState(null);
+  const [printInvoiceId, setPrintInvoiceId] = useState(null);
+  const [printSaleId, setPrintSaleId] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [drawer, setDrawer] = useState(null);
   const workspaceRef = useRef(null);
@@ -243,9 +250,14 @@ function App() {
   const printOrder = report.purchaseOrders.find(
     (order) => order.id === printOrderId,
   );
+  const printInvoice = report.invoices.find(
+    (invoice) => invoice.id === printInvoiceId,
+  );
+  const printSale = report.sales.find((sale) => sale.id === printSaleId);
   const selectedInvoice = report.invoices.find(
     (invoice) => invoice.id === selectedInvoiceId,
   );
+  const selectedSale = report.sales.find((sale) => sale.id === selectedSaleId);
   const selectedOrder = report.purchaseOrders.find(
     (order) => order.id === selectedOrderId,
   );
@@ -256,6 +268,10 @@ function App() {
         ? `${route.id ? "Modifier" : "Nouveau"} bon de commande`
         : page === "invoiceEditor"
           ? `${route.id ? "Modifier" : "Nouvelle"} réception`
+          : page === "saleEditor"
+            ? `${route.id ? "Modifier" : "Nouvelle"} vente`
+            : page === "saleDetail"
+              ? `Vente ${selectedSale?.number || "introuvable"}`
           : page === "invoiceDetail"
             ? `Facture ${selectedInvoice?.number || "Sans numéro"}`
             : page === "orderDetail"
@@ -263,20 +279,12 @@ function App() {
               : page === "supplierDetail" || page === "customerDetail"
                 ? selectedContact?.name || "Fiche introuvable"
                 : navItems.find(([key]) => key === page)?.[1] || "KS";
-  const selectedProduct =
-    dialog?.type === "sale" ? findProduct(catalog, dialog.fields.search) : null;
-  const selectedRow = report.products.find(
-    (row) => row.code === selectedProduct?.code,
-  );
   const breaksConfirmedSales = (invoices) =>
     data.sales.some(
       (sale) =>
         sale.status === "Confirmée/Vendue" &&
-        !derive({ ...data, invoices }).receipts.some(
-          (receipt) =>
-            receipt.productCode === sale.productCode &&
-            receipt.date <= sale.date,
-        ),
+        saleLines(sale).some(line => !derive({ ...data, invoices }).receipts.some(
+          receipt => receipt.productCode === line.productCode && receipt.date <= sale.date)),
     );
 
   const closeDrawer = () =>
@@ -291,7 +299,7 @@ function App() {
     else go(pathFor(fallback), true);
   };
   const backFromDocument = () =>
-    backTo(page === "orderDetail" ? "purchaseOrders" : "receipts");
+    backTo(page === "orderDetail" ? "purchaseOrders" : page === "saleDetail" ? "sales" : "receipts");
   const openContactDetail = (type, id) => {
     if (
       !id ||
@@ -410,20 +418,30 @@ function App() {
     return () => clearTimeout(timeout);
   }, [notice]);
   useEffect(() => {
-    if (!printOrderId) return;
+    if (!printOrderId && !printInvoiceId && !printSaleId) return;
     const timer = setTimeout(() => window.print(), 50);
-    const clear = () => setPrintOrderId(null);
+    const clear = () => {
+      setPrintOrderId(null);
+      setPrintInvoiceId(null);
+      setPrintSaleId(null);
+    };
     window.addEventListener("afterprint", clear);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("afterprint", clear);
     };
-  }, [printOrderId]);
+  }, [printOrderId, printInvoiceId, printSaleId]);
 
   const open = (type, item = null, seed = {}) => {
     const fields = item
       ? { ...item, search: item.productCode || "" }
       : structuredClone({ ...defaults[type], date: today(), ...seed });
+    if (type === "sale") {
+      fields.lines = item ? saleLines(item).map(line => ({ ...line, search: line.productCode })) : fields.lines;
+      if (item) fields.number = saleNumber(item);
+      if (!item) try { fields.number = nextSaleNumber(data.sales, fields.date); }
+      catch (cause) { setNotice(cause.message); return; }
+    }
     if (type === "invoice" && item)
       fields.lines = item.lines.map((line) => ({
         ...line,
@@ -450,13 +468,13 @@ function App() {
           data.products,
         );
     }
-    if (type === "purchaseOrder" || type === "invoice") {
+    if (type === "purchaseOrder" || type === "invoice" || type === "sale") {
       const editorPage =
-        type === "purchaseOrder" ? "orderEditor" : "invoiceEditor";
+        type === "purchaseOrder" ? "orderEditor" : type === "sale" ? "saleEditor" : "invoiceEditor";
       const path = pathFor(editorPage, item?.id);
       const query = !item
         ? new URLSearchParams(
-            type === "invoice"
+             type === "sale" ? { customerId: seed.customerId || "" } : type === "invoice"
               ? {
                   supplierId: seed.supplierId || "",
                   purchaseOrderId: seed.purchaseOrderId || "",
@@ -485,11 +503,11 @@ function App() {
   };
   useEffect(() => {
     if (!editingDocument) return;
-    const type = page === "orderEditor" ? "purchaseOrder" : "invoice";
+    const type = page === "orderEditor" ? "purchaseOrder" : page === "saleEditor" ? "sale" : "invoice";
     const path = pathFor(page, route.id);
     if (dialog?.editorPath === path) return;
     const item = route.id
-      ? (type === "purchaseOrder" ? data.purchaseOrders : data.invoices).find(
+      ? (type === "purchaseOrder" ? data.purchaseOrders : type === "sale" ? data.sales : data.invoices).find(
           (row) => row.id === route.id,
         )
       : null;
@@ -499,14 +517,14 @@ function App() {
     }
     const params = new URLSearchParams(window.location.search);
     const seed = !route.id
-      ? { supplierId: params.get("supplierId") || "" }
+      ? type === "sale" ? { customerId: params.get("customerId") || "" } : { supplierId: params.get("supplierId") || "" }
       : {};
     if (type === "invoice" && !route.id)
       seed.purchaseOrderId = params.get("purchaseOrderId") || "";
     const fields = item
       ? {
           ...item,
-          lines: item.lines.map((line) => ({
+           lines: (type === "sale" ? saleLines(item) : item.lines).map((line) => ({
             ...line,
             search: line.productCode,
           })),
@@ -514,6 +532,9 @@ function App() {
       : structuredClone({ ...defaults[type], date: today(), ...seed });
     if (type === "purchaseOrder" && !item)
       fields.number = nextPurchaseOrderNumber(data.purchaseOrders, fields.date);
+    if (type === "sale" && !item) try { fields.number = nextSaleNumber(data.sales, fields.date); }
+    catch (cause) { fields.number = ""; }
+    if (type === "sale" && item) fields.number = saleNumber(item);
     if (type === "invoice" && !item && fields.purchaseOrderId) {
       const order = report.purchaseOrders.find(
         (row) =>
@@ -536,7 +557,7 @@ function App() {
       type,
       id: item?.id || null,
       fields,
-      error: "",
+      error: type === "sale" && !fields.number ? "Les 1 000 numéros de vente de cette date sont utilisés." : "",
       editorPath: path,
     });
   }, [
@@ -546,13 +567,20 @@ function App() {
     dialog?.editorPath,
     data.purchaseOrders,
     data.invoices,
+    data.sales,
   ]);
-  const setField = (name, value) =>
+  const setField = (name, value) => {
+    let nextNumber;
+    if (dialog?.type === "sale" && name === "date" && value !== dialog.fields.date && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      try { nextNumber = nextSaleNumber(data.sales, value, Math.random, dialog.id); }
+      catch (cause) { fail(cause.message); return; }
+    }
     setDialog((current) => ({
       ...current,
-      fields: { ...current.fields, [name]: value },
+      fields: { ...current.fields, [name]: value, ...(nextNumber ? { number: nextNumber } : {}) },
       error: "",
     }));
+  };
   const uploadPicture = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -678,9 +706,32 @@ function App() {
       families: [...current.families, family],
       products: [...current.products, variant],
     }));
-    addDocumentProduct(variant);
+    if (dialog.type === "sale") addSaleProduct(variant);
+    else addDocumentProduct(variant);
     return variant;
   };
+  const addSaleProduct = (product) => setDialog(current => {
+    if (!current || current.type !== "sale" || current.fields.lines.some(line => line.search === product.code)) return current;
+    const suggestedPrice = report.products.find(row => row.code === product.code)?.suggestedPrice;
+    return { ...current, error: "", fields: { ...current.fields,
+      lines: [...current.fields.lines, { id: uid(), search: product.code, quantity: 1,
+        unitPrice: Number.isFinite(suggestedPrice) && suggestedPrice > 0 ? suggestedPrice : "" }] } };
+  });
+  const createSaleCustomer = values => {
+    const name = String(values.name || "").trim();
+    if (!name) throw new Error("Renseigne le nom du client.");
+    if (data.customers.some(row => row.name.trim().toLocaleLowerCase("fr") === name.toLocaleLowerCase("fr")))
+      throw new Error("Ce client existe déjà.");
+    const customer = { id: uid(), name, contact: values.contact?.trim() || "", phone: values.phone?.trim() || "",
+      email: values.email?.trim() || "", address: values.address?.trim() || "", note: "" };
+    setData(current => ({ ...current, customers: [...current.customers, customer] }));
+    setField("customerId", customer.id);
+    return customer;
+  };
+  const setSaleLine = (index, name, value) => setDialog(current => ({ ...current, error: "",
+    fields: { ...current.fields, lines: current.fields.lines.map((line, i) => i === index ? { ...line, [name]: value } : line) } }));
+  const deleteSaleLine = index => setDialog(current => ({ ...current, error: "",
+    fields: { ...current.fields, lines: current.fields.lines.filter((_, i) => i !== index) } }));
   const cancelDocumentOrder = () => {
     const order = data.purchaseOrders.find((row) => row.id === dialog?.id);
     const hasReceipts = hasLinkedReceipts(order?.id, data.invoices);
@@ -1079,28 +1130,26 @@ function App() {
         );
       setData((current) => ({ ...current, invoices: nextInvoices }));
     } else if (type === "sale") {
-      const product = findProduct(catalog, fields.search);
-      if (!product)
-        return fail("Choisis un code ou un nom complet présent dans Produits.");
+      const previousStatus = data.sales.find((row) => row.id === id)?.status || "En attente";
+      const nextStatus = saleStatusForAction(previousStatus, action);
+      if (!nextStatus) return fail("Cette transition de vente n’est pas autorisée.");
       if (!fields.date) return fail("La date est nécessaire.");
-      const quantity = Number(fields.quantity);
-      const unitPrice = Number(fields.unitPrice);
-      if (
-        !Number.isInteger(quantity) ||
-        quantity < 1 ||
-        !Number.isFinite(unitPrice) ||
-        unitPrice <= 0
-      )
-        return fail("Saisis une quantité entière et un prix réel positif.");
-      if (
-        fields.status === "Confirmée/Vendue" &&
-        !report.receipts.some(
-          (row) => row.productCode === product.code && row.date <= fields.date,
-        )
-      )
+      if (!fields.number) return fail("Aucun numéro de vente disponible pour cette date.");
+      if (!fields.lines.length) return fail("Ajoute au moins un produit.");
+      const lines = fields.lines.map(line => ({ id: line.id || uid(), productCode: findProduct(catalog, line.search)?.code,
+        quantity: Number(line.quantity), unitPrice: Number(line.unitPrice) }));
+      if (lines.some(line => !line.productCode || !Number.isInteger(line.quantity) || line.quantity < 1 ||
+        !Number.isFinite(line.unitPrice) || line.unitPrice <= 0))
+        return fail("Choisis un produit, une quantité entière et un prix réel positif pour chaque ligne.");
+      if (new Set(lines.map(line => line.productCode)).size !== lines.length)
+        return fail("Chaque produit doit apparaître une seule fois.");
+      if (nextStatus === "Confirmée/Vendue" && lines.some(line => !report.receipts.some(
+        row => row.productCode === line.productCode && row.date <= fields.date)))
         return fail(
-          "Ajoute une réception datée au plus tard du jour de la vente.",
+          "Ajoute une réception datée au plus tard du jour de la vente pour chaque produit.",
         );
+      if (data.sales.some(row => row.id !== id && row.number === fields.number))
+        return fail("Ce numéro de vente existe déjà.");
       if (
         fields.customerId &&
         !data.customers.some((row) => row.id === fields.customerId)
@@ -1109,13 +1158,12 @@ function App() {
       const sale = {
         id: id || uid(),
         date: fields.date,
+        number: fields.number,
         order: fields.order.trim(),
         customerId: fields.customerId || null,
         client: fields.client.trim(),
-        productCode: product.code,
-        quantity,
-        unitPrice,
-        status: fields.status,
+        lines,
+        status: nextStatus,
         payment: fields.payment,
         note: fields.note.trim(),
       };
@@ -1125,6 +1173,7 @@ function App() {
           ? current.sales.map((row) => (row.id === id ? sale : row))
           : [...current.sales, sale],
       }));
+      savedDocumentId = sale.id;
     } else {
       const amount = Number(fields.amount);
       if (
@@ -1157,7 +1206,7 @@ function App() {
         setDialog(null);
         go(
           pathFor(
-            type === "purchaseOrder" ? "orderDetail" : "invoiceDetail",
+            type === "purchaseOrder" ? "orderDetail" : type === "sale" ? "saleDetail" : "invoiceDetail",
             savedDocumentId,
           ),
         );
@@ -1183,7 +1232,7 @@ function App() {
     if (
       usedCodes &&
       (report.receipts.some((row) => usedCodes.has(row.productCode)) ||
-        data.sales.some((row) => usedCodes.has(row.productCode)) ||
+      data.sales.some((row) => saleLines(row).some(line => usedCodes.has(line.productCode))) ||
         data.purchaseOrders.some((order) =>
           order.lines.some((line) => usedCodes.has(line.productCode)),
         ))
@@ -1258,23 +1307,7 @@ function App() {
     }
     closeDrawer();
     setNotice("Élément supprimé.");
-  };
-  const changeStatus = (sale, status) => {
-    if (
-      status === "Confirmée/Vendue" &&
-      !report.receipts.some(
-        (row) => row.productCode === sale.productCode && row.date <= sale.date,
-      )
-    ) {
-      setNotice("Réception manquante à la date de cette vente.");
-      return;
-    }
-    setData((current) => ({
-      ...current,
-      sales: current.sales.map((row) =>
-        row.id === sale.id ? { ...row, status } : row,
-      ),
-    }));
+    return true;
   };
   const install = async () => {
     if (installPrompt) {
@@ -1398,7 +1431,7 @@ function App() {
             ))}
           </nav>
           <div className="workspace" ref={workspaceRef}>
-            <div className="content">
+            <div className={`content${editingDocument ? " content-document-editor" : ""}`}>
               {(syncStatus === "offline" || pendingCount > 0) && (
                 <div className="sync-banner" role="status">
                   {syncStatus === "offline"
@@ -1417,7 +1450,13 @@ function App() {
                 </section>
               )}
               {editingDocument &&
-                (dialog?.editorPath === pathFor(page, route.id) ? (
+                (page === "saleEditor" ? (dialog?.editorPath === pathFor(page, route.id) ?
+                  <SaleEditor fields={dialog.fields} error={dialog.error} catalog={catalog} customers={data.customers}
+                    onField={setField} onLine={setSaleLine} onDeleteLine={deleteSaleLine} onAddProduct={addSaleProduct}
+                    onCreateProduct={createDocumentProduct} onCreateCustomer={createSaleCustomer} onSave={save}
+                    onCancel={() => { setDialog(null); backTo("sales"); }} /> :
+                  <section className="panel"><Empty text="Cette vente est introuvable." /></section>) :
+                dialog?.editorPath === pathFor(page, route.id) ? (
                   <DocumentEditor
                     type={dialog.type}
                     fields={dialog.fields}
@@ -1489,7 +1528,7 @@ function App() {
                       <span>Résultat estimé après dépenses</span>
                       <strong>{money(report.totals.net)}</strong>
                       <small>
-                        {report.totals.confirmedCount} ligne
+                          {report.totals.confirmedCount} vente
                         {report.totals.confirmedCount > 1 ? "s" : ""} confirmée
                         {report.totals.confirmedCount > 1 ? "s" : ""}
                       </small>
@@ -1540,13 +1579,9 @@ function App() {
                           .map((s) => (
                             <div className="compact-row" key={s.id}>
                               <div>
-                                <strong>
-                                  {s.product
-                                    ? productName(s.product)
-                                    : s.productCode}
-                                </strong>
+                                <strong><AppLink className="product-link" to={pathFor("saleDetail", s.id)}>{s.number} · {s.lines.length} produit(s)</AppLink></strong>
                                 <small>
-                                  {s.date} · {s.status}
+                                  {s.date} · {saleStatusLabel(s.status)}
                                 </small>
                               </div>
                               <b>{money(s.revenue)}</b>
@@ -1853,6 +1888,7 @@ function App() {
                     )}
                     onBack={backFromDocument}
                     onEdit={() => open("invoice", selectedInvoice)}
+                    onPrint={() => setPrintInvoiceId(selectedInvoice.id)}
                   />
                 ) : (
                   <section className="panel">
@@ -1862,6 +1898,12 @@ function App() {
                     </button>
                   </section>
                 ))}
+              {page === "saleDetail" && (selectedSale ?
+                <SaleDetail sale={selectedSale} canShare={syncStatus === "online" && pendingCount === 0}
+                  onBack={backFromDocument} onEdit={() => open("sale", selectedSale)}
+                  onPrint={() => setPrintSaleId(selectedSale.id)}
+                  onDelete={() => { if (remove("sale", selectedSale)) go(pathFor("sales")); }} /> :
+                <section className="panel"><Empty text="Cette vente est introuvable." /></section>)}
               {page === "orderDetail" &&
                 (selectedOrder ? (
                   <OrderDetail
@@ -2085,7 +2127,7 @@ function App() {
                 </section>
               )}
               {page === "purchaseOrders" && (
-                <section className="panel">
+                <section className="panel document-list-panel">
                   <div className="panel-head wrap">
                     <div>
                       <h2>Bons de commande fournisseur</h2>
@@ -2196,7 +2238,7 @@ function App() {
                 </section>
               )}
               {page === "receipts" && (
-                <section className="panel">
+                <section className="panel document-list-panel">
                   <div className="panel-head wrap">
                     <div>
                       <h2>Réceptions par facture</h2>
@@ -2295,6 +2337,13 @@ function App() {
                           <div className="entry-actions">
                             <button
                               className="icon-button"
+                              aria-label="Imprimer la réception"
+                              onClick={() => setPrintInvoiceId(row.original.id)}
+                            >
+                              <Printer size={16} />
+                            </button>
+                            <button
+                              className="icon-button"
                               aria-label="Modifier la facture"
                               onClick={() => open("invoice", row.original)}
                             >
@@ -2315,7 +2364,7 @@ function App() {
                 </section>
               )}
               {page === "sales" && (
-                <section className="panel">
+                <section className="panel document-list-panel">
                   <div className="panel-head wrap">
                     <div>
                       <h2>Ventes</h2>
@@ -2336,15 +2385,14 @@ function App() {
                     columns={[
                       { accessorKey: "date", header: "Date" },
                       {
-                        accessorFn: (s) =>
-                          s.product ? productName(s.product) : s.productCode,
+                         accessorFn: (s) => s.lines.map(line => line.product ? productName(line.product) : line.productCode).join(", "),
                         id: "productName",
                         header: "Produit",
                         cell: ({ row }) => (
                           <>
                             <strong>{row.getValue("productName")}</strong>
                             <small>
-                              {row.original.order ||
+                               {row.original.number} · {row.original.order ||
                                 row.original.client ||
                                 row.original.productCode}
                             </small>
@@ -2373,12 +2421,7 @@ function App() {
                             row.original.client || "Vente anonyme"
                           ),
                       },
-                      { accessorKey: "quantity", header: "Unités" },
-                      {
-                        accessorKey: "unitPrice",
-                        header: "Prix réel",
-                        cell: (info) => money(info.getValue()),
-                      },
+                       { accessorKey: "quantity", header: "Unités" },
                       {
                         accessorKey: "revenue",
                         header: "Total",
@@ -2403,19 +2446,7 @@ function App() {
                       {
                         accessorKey: "status",
                         header: "Statut",
-                        cell: ({ row }) => (
-                          <select
-                            aria-label="Statut de la vente"
-                            value={row.original.status}
-                            onChange={(event) =>
-                              changeStatus(row.original, event.target.value)
-                            }
-                          >
-                            <option>En attente</option>
-                            <option>Confirmée/Vendue</option>
-                            <option>Annulée</option>
-                          </select>
-                        ),
+                        cell: ({ row }) => <span className="sale-status-badge">{saleStatusLabel(row.original.status)}</span>,
                       },
                       {
                         id: "actions",
@@ -2424,6 +2455,7 @@ function App() {
                         enableColumnFilter: false,
                         cell: ({ row }) => (
                           <div className="entry-actions">
+                            <AppLink className="icon-button" aria-label="Voir la vente" to={pathFor("saleDetail", row.original.id)}><Eye size={16} /></AppLink>
                             <button
                               className="icon-button"
                               aria-label="Modifier la vente"
@@ -3034,34 +3066,6 @@ function App() {
                       </div>
                     </>
                   )}
-                  {dialog.type === "sale" && (
-                    <>
-                      <Field
-                        label="Date"
-                        type="date"
-                        value={dialog.fields.date}
-                        onChange={(v) => setField("date", v)}
-                        required
-                      />
-                      <Field
-                        label="Code ou nom complet du produit"
-                        list="product-options"
-                        value={dialog.fields.search}
-                        onChange={(v) => setField("search", v)}
-                        required
-                      />
-                      {selectedRow && (
-                        <div className="lookup-hint">
-                          <strong>{selectedRow.name}</strong>
-                          <span>
-                            {selectedRow.unitsPerCase} unités/caisse ·{" "}
-                            {selectedRow.stock} en stock · Prix conseillé :{" "}
-                            {money(selectedRow.suggestedPrice)}
-                          </span>
-                        </div>
-                      )}
-                    </>
-                  )}
                   {dialog.type === "invoice" && (
                     <>
                       <Field
@@ -3195,9 +3199,8 @@ function App() {
                       </div>
                     </>
                   )}
-                  {(dialog.type === "invoice" ||
-                    dialog.type === "sale" ||
-                    dialog.type === "purchaseOrder") && (
+                   {(dialog.type === "invoice" ||
+                     dialog.type === "purchaseOrder") && (
                     <datalist id="product-options">
                       {catalog.flatMap((p) => [
                         <option key={`c-${p.code}`} value={p.code}>
@@ -3208,78 +3211,6 @@ function App() {
                         </option>,
                       ])}
                     </datalist>
-                  )}
-                  {dialog.type === "sale" && (
-                    <>
-                      <EntitySelect
-                        label="Client"
-                        value={dialog.fields.customerId || ""}
-                        onChange={(v) => setField("customerId", v)}
-                        rows={data.customers}
-                      />
-                      <div className="field-row">
-                        <Field
-                          label="N° commande"
-                          value={dialog.fields.order}
-                          onChange={(v) => setField("order", v)}
-                        />
-                        <Field
-                          label="Référence libre"
-                          value={dialog.fields.client}
-                          onChange={(v) => setField("client", v)}
-                        />
-                      </div>
-                      <div className="field-row">
-                        <Field
-                          label="Quantité vendue"
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={dialog.fields.quantity}
-                          onChange={(v) => setField("quantity", v)}
-                          required
-                        />
-                        <Field
-                          label="Prix réel par unité (G)"
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={dialog.fields.unitPrice}
-                          onChange={(v) => setField("unitPrice", v)}
-                          required
-                        />
-                      </div>
-                      <div className="field-row">
-                        <SelectField
-                          label="Statut"
-                          value={dialog.fields.status}
-                          onChange={(v) => setField("status", v)}
-                          options={[
-                            "En attente",
-                            "Confirmée/Vendue",
-                            "Annulée",
-                          ]}
-                        />
-                        <SelectField
-                          label="Paiement"
-                          value={dialog.fields.payment}
-                          onChange={(v) => setField("payment", v)}
-                          options={[
-                            "",
-                            "MonCash",
-                            "NatCash",
-                            "Espèces",
-                            "Virement",
-                            "Autre",
-                          ]}
-                        />
-                      </div>
-                      <Field
-                        label="Livraison / notes"
-                        value={dialog.fields.note}
-                        onChange={(v) => setField("note", v)}
-                      />
-                    </>
                   )}
                   {dialog.type === "expense" && (
                     <>
@@ -3376,58 +3307,9 @@ function App() {
             </button>
           </div>
         )}
-        {printOrder && (
-          <section className="print-order">
-            <div className="print-header">
-              <div>
-                <strong>KS</strong>
-                <h1>Bon de commande {printOrder.number}</h1>
-                <p>Date : {printOrder.date}</p>
-              </div>
-              <div>
-                <strong>Fournisseur</strong>
-                <p>{printOrder.supplier?.name}</p>
-                <p>{printOrder.supplier?.contact}</p>
-                <p>{printOrder.supplier?.address}</p>
-                <p>
-                  {printOrder.supplier?.phone} {printOrder.supplier?.email}
-                </p>
-              </div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Produit</th>
-                  <th>Caisses</th>
-                  <th>Prix/caisse</th>
-                  <th>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {printOrder.lines.map((line) => (
-                  <tr key={line.id}>
-                    <td>{line.productCode}</td>
-                    <td>
-                      {line.product
-                        ? productName(line.product)
-                        : line.productCode}
-                    </td>
-                    <td>{line.cases}</td>
-                    <td>{money(line.casePrice)}</td>
-                    <td>
-                      {money(Number(line.cases) * Number(line.casePrice))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="print-total">
-              Total prévu : {money(printOrder.plannedTotal)}
-            </p>
-            {printOrder.note && <p>Notes : {printOrder.note}</p>}
-          </section>
-        )}
+        {printOrder && <PrintableDocument document={printOrder} kind="order" supplier={printOrder.supplier} />}
+        {printInvoice && <PrintableDocument document={printInvoice} kind="invoice" supplier={data.suppliers.find((supplier) => supplier.id === printInvoice.supplierId)} />}
+        {printSale && <PrintableDocument document={printSale} kind="sale" />}
         {(syncStatus === "connecting" || syncStatus === "unavailable") && (
           <div className="sync-overlay" role="dialog" aria-modal="true">
             <section className="panel sync-panel">
@@ -3631,9 +3513,52 @@ function ShareActions({ kind, id, canShare }) {
   );
 }
 
-function InvoiceDetail({ invoice, order, supplier, onBack, onEdit, canShare }) {
+function PrintableDocument({ document, kind, supplier }) {
+  const isOrder = kind === "order";
+  const isSale = kind === "sale";
+  const total = isSale ? document.revenue : isOrder ? document.plannedTotal : document.total;
   return (
-    <div className="document-page">
+    <section className="print-order">
+      <div className="print-header">
+        <div>
+          <strong className="print-brand">KS</strong>
+          <h1>{isOrder ? "Bon de commande" : isSale ? "Vente" : "Réception"} {document.number || "Sans numéro"}</h1>
+          <p>Date : {document.date}</p>
+          {isSale && <p>Statut : {saleStatusLabel(document.status)}{document.payment ? ` · Paiement : ${document.payment}` : ""}</p>}
+        </div>
+        <div className="print-supplier">
+          <span>{isSale ? "Client" : "Fournisseur"}</span>
+          <strong>{isSale ? document.customerName || document.client || "Non précisé" : supplier?.name || document.supplier || "Non précisé"}</strong>
+          {!isSale && supplier?.contact && <p>{supplier.contact}</p>}
+          {!isSale && supplier?.address && <p>{supplier.address}</p>}
+          {!isSale && (supplier?.phone || supplier?.email) && <p>{supplier.phone} {supplier.email}</p>}
+          {isSale && document.order && <p>Commande : {document.order}</p>}
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Code</th><th>Produit</th><th>{isSale ? "Unités" : "Caisses"}</th><th>{isSale ? "Prix/unité" : "Prix/caisse"}</th><th>Total</th></tr></thead>
+        <tbody>{document.lines.map((line) => (
+          <tr key={line.id}>
+            <td>{line.productCode}</td>
+            <td>{line.product ? productName(line.product) : line.productCode}{line.note && <small>{line.note}</small>}</td>
+            <td>{isSale ? line.quantity : line.cases}</td>
+            <td>{money(isSale ? line.unitPrice : line.casePrice)}</td>
+            <td>{money(isSale ? line.revenue : Number(line.cases) * Number(line.casePrice))}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      <div className="print-summary">
+        <span>{document.lines.length} produit(s) · {document.lines.reduce((sum, line) => sum + Number(isSale ? line.quantity || 0 : line.cases || 0), 0)} {isSale ? "unité(s)" : "caisse(s)"}</span>
+        <strong>Total {isOrder ? "prévu" : isSale ? "vente" : "facture"} : {money(total)}</strong>
+      </div>
+      {document.note && <p className="print-note"><strong>Notes :</strong> {document.note}</p>}
+    </section>
+  );
+}
+
+function InvoiceDetail({ invoice, order, supplier, onBack, onEdit, onPrint, canShare }) {
+  return (
+    <div className="document-page document-workspace">
       <button
         type="button"
         className="text-button product-back"
@@ -3651,6 +3576,9 @@ function InvoiceDetail({ invoice, order, supplier, onBack, onEdit, canShare }) {
           <div className="entry-actions">
             <button type="button" className="secondary" onClick={onEdit}>
               <Pencil size={16} /> Modifier
+            </button>
+            <button type="button" className="secondary" onClick={onPrint}>
+              <Printer size={16} /> Imprimer
             </button>
             <ShareActions kind="invoice" id={invoice.id} canShare={canShare} />
           </div>
@@ -3697,10 +3625,11 @@ function InvoiceDetail({ invoice, order, supplier, onBack, onEdit, canShare }) {
           </p>
         )}
       </section>
-      <section className="panel">
+      <section className="panel document-items">
         <div className="panel-head">
           <h3>Produits reçus</h3>
         </div>
+        <div className="document-line-head"><span>Produit</span><span>Quantité</span><span>Coût/caisse</span><span>Total</span></div>
         {invoice.lines.length ? (
           invoice.lines.map((line) => (
             <div className="document-line" key={line.id}>
@@ -3743,7 +3672,7 @@ function OrderDetail({
   canShare,
 }) {
   return (
-    <div className="document-page">
+    <div className="document-page document-workspace">
       <button
         type="button"
         className="text-button product-back"
@@ -3801,10 +3730,11 @@ function OrderDetail({
           </p>
         )}
       </section>
-      <section className="panel">
+      <section className="panel document-items">
         <div className="panel-head">
           <h3>Produits commandés</h3>
         </div>
+        <div className="document-line-head"><span>Produit</span><span>Quantités</span><span>Prix/caisse</span><span>Écart</span></div>
         {order.lines.map((line) => (
           <div className="document-line" key={line.id}>
             <div>
@@ -4202,12 +4132,10 @@ function ContactDetail({
                 <div className="contact-history-row" key={sale.id}>
                   <div>
                     <strong>
-                      {sale.product
-                        ? productName(sale.product)
-                        : sale.productCode}
+                      <AppLink className="product-link" to={pathFor("saleDetail", sale.id)}>{sale.number} · {sale.lines.length} produit(s)</AppLink>
                     </strong>
                     <small>
-                      {sale.date} · {sale.quantity} unité(s) · {sale.status}
+                      {sale.date} · {sale.quantity} unité(s) · {saleStatusLabel(sale.status)}
                       {sale.order ? ` · ${sale.order}` : ""}
                     </small>
                   </div>
@@ -4232,6 +4160,106 @@ function ContactDetail({
       )}
     </div>
   );
+}
+
+function SaleDetail({ sale, canShare, onBack, onEdit, onPrint, onDelete }) {
+  return <div className="document-page document-workspace sale-document">
+    <button type="button" className="text-button product-back" onClick={onBack}>← Retour</button>
+    <section className="panel">
+      <div className="panel-head wrap"><div><span className="eyebrow">VENTE</span><h2>{sale.number}</h2><p>{sale.date} · {saleStatusLabel(sale.status)}</p></div>
+        <div className="entry-actions"><button type="button" className="secondary" onClick={onPrint}><Printer size={16}/> Imprimer</button>
+          <button type="button" className="secondary" onClick={onEdit}><Pencil size={16}/> Modifier</button>
+          <ShareActions kind="sale" id={sale.id} canShare={canShare}/>
+          <button type="button" className="icon-button danger" aria-label="Supprimer la vente" onClick={onDelete}><Trash2 size={16}/></button></div></div>
+      <div className="document-facts"><div><span>Client</span><strong>{sale.customerName || sale.client || "Non précisé"}</strong></div>
+        <div><span>Commande</span><strong>{sale.order || "—"}</strong></div><div><span>Paiement</span><strong>{sale.payment || "—"}</strong></div>
+        <div><span>Total</span><strong>{money(sale.revenue)}</strong></div></div>
+      {sale.note && <p className="document-note"><strong>Notes :</strong> {sale.note}</p>}
+    </section>
+    <section className="panel document-items"><div className="panel-head"><h3>Produits vendus</h3></div>
+      <div className="document-line-head"><span>Produit</span><span>Unités</span><span>Prix/unité</span><span>Total</span></div>
+      {sale.lines.map(line => <div className="document-line" key={line.id}><div><strong>{line.product ? productName(line.product) : line.productCode}</strong><small>{line.productCode}</small></div>
+        <div className="document-line-values"><span>{line.quantity} unité(s)</span><span>{money(line.unitPrice)}</span><strong>{money(line.revenue)}</strong></div></div>)}
+      <div className="document-total">Total : <strong>{money(sale.revenue)}</strong></div>
+    </section>
+    <section className="panel sale-internal"><h3>Résultat interne</h3><p>Coût : {sale.validCost ? money(sale.cost) : "Indisponible"} · Bénéfice : {sale.validCost ? money(sale.profit) : "Indisponible"} · Marge : {sale.validCost ? percent(sale.margin) : "—"}</p></section>
+  </div>;
+}
+
+function SaleEditor({ fields, error, catalog, customers, onField, onLine, onDeleteLine, onAddProduct,
+  onCreateProduct, onCreateCustomer, onSave, onCancel }) {
+  const [productQuery, setProductQuery] = useState("");
+  const [customerQuery, setCustomerQuery] = useState(() => customers.find(row => row.id === fields.customerId)?.name || "");
+  const [createKind, setCreateKind] = useState(null);
+  const [createError, setCreateError] = useState("");
+  const [newCustomer, setNewCustomer] = useState({ name: "", contact: "", phone: "", email: "", address: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", volume: "", category: "", variant: "", code: "", unitsPerCase: 6 });
+  const products = catalog.filter(p => `${p.code} ${productName(p)}`.toLocaleLowerCase("fr").includes(productQuery.trim().toLocaleLowerCase("fr")));
+  const matchingCustomers = customers.filter(row => row.name.toLocaleLowerCase("fr").includes(customerQuery.trim().toLocaleLowerCase("fr")));
+  const selectedCustomer = customers.find(row => row.id === fields.customerId);
+  const create = () => { try { const row = createKind === "customer" ? onCreateCustomer(newCustomer) : onCreateProduct(newProduct);
+    if (createKind === "customer") setCustomerQuery(row.name); else setProductQuery("");
+    setCreateKind(null); setCreateError(""); } catch (cause) { setCreateError(cause.message); } };
+  return <form className="document-editor sale-editor" onSubmit={onSave}>
+    <section className="panel document-editor-party">
+      <SearchCombobox label="Rechercher un client (facultatif)" value={customerQuery}
+        onChange={value => { setCustomerQuery(value); if (value !== customers.find(row => row.id === fields.customerId)?.name) onField("customerId", ""); }}
+        items={matchingCustomers.slice(0, 8)} itemLabel={row => row.name}
+        onPick={row => { onField("customerId", row.id); setCustomerQuery(row.name); }}
+        onCreate={() => { setNewCustomer(current => ({ ...current, name: customerQuery })); setCreateKind("customer"); setCreateError(""); }} createLabel="Créer un client"/>
+      <div className="document-party-summary"><span>Client · {saleStatusLabel(fields.status)}</span><strong>{selectedCustomer?.name || fields.client || "Vente sans client"}</strong>
+        {selectedCustomer?.phone && <small>{selectedCustomer.phone}</small>}
+        {selectedCustomer?.address && <small>{selectedCustomer.address}</small>}
+        {fields.customerId && <button type="button" className="text-button" onClick={() => { onField("customerId", ""); setCustomerQuery(""); }}>Retirer</button>}</div>
+    </section>
+    <section className="panel document-editor-searches">
+      <SearchCombobox label="Rechercher un produit" value={productQuery} onChange={setProductQuery} items={products.slice(0, 8)}
+        itemLabel={p => `${p.code} · ${productName(p)}`} onPick={p => { onAddProduct(p); setProductQuery(""); }}
+        onCreate={() => { setNewProduct(current => ({ ...current, name: productQuery })); setProductQuery(""); setCreateKind("product"); setCreateError(""); }} createLabel="Créer un produit" preventEnterSubmit/>
+    </section>
+    {createKind && <section className="panel document-editor-create"><div className="panel-head"><h3>Créer {createKind === "customer" ? "un client" : "un produit"}</h3>
+      <button type="button" className="icon-button" onClick={() => setCreateKind(null)} aria-label="Fermer"><X size={17}/></button></div>
+      <div className="document-editor-fields">{createKind === "customer" ? <>
+        {[["name", "Nom"], ["contact", "Contact"], ["phone", "Téléphone"], ["email", "Email"], ["address", "Adresse"]].map(([key, label]) =>
+          <Field key={key} label={label} value={newCustomer[key]} onChange={value => setNewCustomer(current => ({ ...current, [key]: value }))}/>)}
+      </> : <>{[["name", "Nom"], ["volume", "Volume"], ["category", "Catégorie"], ["variant", "Variante"], ["code", "Code (facultatif)"]].map(([key, label]) =>
+        <Field key={key} label={label} value={newProduct[key]} onChange={value => setNewProduct(current => ({ ...current, [key]: value }))}/>)}
+        <Field label="Unités par caisse" type="number" min="1" step="1" value={newProduct.unitsPerCase} onChange={value => setNewProduct(current => ({ ...current, unitsPerCase: value }))}/></>}</div>
+      {createError && <p role="alert" className="form-error">{createError}</p>}<button type="button" className="secondary" onClick={create}>Créer</button></section>}
+    <section className="panel document-editor-info"><div className="document-editor-fields"><Field label="N° commande" value={fields.order} onChange={value => onField("order", value)}/>
+      <Field label="Référence libre" value={fields.client} onChange={value => onField("client", value)}/></div></section>
+    <section className="panel receipt-items"><div className="panel-head wrap"><div><h3>Produits vendus</h3><p>Ajoute un produit avec la recherche, puis indique les unités et le prix réel.</p></div><span className="document-editor-count">{fields.lines.length} ligne(s)</span></div>
+      <div className="receipt-table-wrap"><table className="receipt-table"><thead><tr><th>Code</th><th>Produit</th><th>Variante</th><th>Format</th><th>Unités</th><th>Prix/unité</th><th>Total ligne</th><th><span className="sr-only">Action</span></th></tr></thead>
+        <tbody>{fields.lines.map((line, index) => {
+          const product = findProduct(catalog, line.search);
+          return <tr key={line.id}>
+            <td data-label="Code" className="receipt-code"><Field label={`Code ou nom, ligne ${index + 1}`} list="sale-products" value={line.search} onChange={value => onLine(index, "search", value)} required/></td>
+            <td data-label="Produit"><strong>{product ? product.brand || productName(product) : "Produit à choisir"}</strong></td>
+            <td data-label="Variante">{product?.variant || "—"}</td>
+            <td data-label="Format">{product?.format || product?.volume || "—"}</td>
+            <td data-label="Unités"><Field label={`Unités, ligne ${index + 1}`} type="number" min="1" step="1" value={line.quantity} onChange={value => onLine(index, "quantity", value)} required/></td>
+            <td data-label="Prix/unité"><Field label={`Prix réel par unité, ligne ${index + 1}`} type="number" min="0.01" step="0.01" value={line.unitPrice} onChange={value => onLine(index, "unitPrice", value)} required/></td>
+            <td data-label="Total ligne" className="receipt-line-total">{money(Number(line.quantity || 0) * Number(line.unitPrice || 0))}</td>
+            <td className="receipt-remove"><button type="button" className="icon-button danger" aria-label={`Supprimer la ligne ${index + 1}`} onClick={() => onDeleteLine(index)}><Trash2 size={15}/></button></td>
+          </tr>;
+        })}</tbody></table>
+        {!fields.lines.length && <Empty text="Aucun produit sélectionné. Utilise la recherche pour ajouter une ligne." />}
+      </div>
+      <datalist id="sale-products">{catalog.flatMap(p => [<option key={p.code} value={p.code}>{productName(p)}</option>, <option key={`n-${p.code}`} value={productName(p)}>{p.code}</option>])}</datalist>
+    </section>
+    <section className="panel"><div className="document-editor-fields"><SelectField label="Paiement" value={fields.payment} onChange={value => onField("payment", value)} options={["", "MonCash", "NatCash", "Espèces", "Virement", "Autre"]}/>
+      <Field label="Livraison / notes" value={fields.note} onChange={value => onField("note", value)}/></div></section>
+    <footer className="document-editor-footer">
+      <div className="document-editor-footer-fields"><Field label="Date de vente" type="date" value={fields.date} onChange={value => onField("date", value)} required/>
+        <Field label="N° vente" value={fields.number} onChange={() => {}} readOnly/></div>
+      <div className="document-editor-totals"><span>{fields.lines.length} produit(s) · {fields.lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0)} unité(s)</span><strong>Total vente : {money(fields.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0))}</strong></div>
+      {error && <p role="alert" className="form-error">{error}</p>}
+      <div className="document-editor-actions"><button type="button" className="secondary" onClick={onCancel}>Retour</button><button type="submit" value="save" className="secondary">{fields.status === "En attente" ? "Enregistrer le brouillon" : "Enregistrer"}</button>
+        {fields.status === "En attente" && <button type="submit" value="sell" className="primary">Marquer vendue</button>}
+        {fields.status === "Confirmée/Vendue" && <><button type="submit" value="reopen" className="secondary">Repasser en brouillon</button><button type="submit" value="cancel" className="primary">Annuler la vente</button></>}
+        {fields.status === "Annulée" && <button type="submit" value="reopen" className="primary">Rouvrir en brouillon</button>}</div>
+    </footer>
+  </form>;
 }
 
 function DocumentEditor({
@@ -4261,6 +4289,7 @@ function DocumentEditor({
   const linkedOrder = !isOrder
     ? orders.find((row) => row.id === fields.purchaseOrderId)
     : null;
+  const selectedSupplier = suppliers.find((row) => row.id === fields.supplierId);
   const [productQuery, setProductQuery] = useState("");
   const [supplierQuery, setSupplierQuery] = useState(
     () => suppliers.find((row) => row.id === fields.supplierId)?.name || "",
@@ -4315,6 +4344,7 @@ function DocumentEditor({
     order?.lines.reduce((sum, line) => sum + line.remainingCases, 0) || 0;
   const chooseProduct = (product) => {
     if (!readOnly && !locked) onAddProduct(product);
+    setProductQuery("");
     setExpandedCode(product.code);
   };
   const create = (kind) => {
@@ -4324,7 +4354,7 @@ function DocumentEditor({
         setSupplierQuery(supplier.name);
       } else {
         const product = onCreateProduct(newProduct);
-        setProductQuery(product.code);
+        setProductQuery("");
         setExpandedCode(product.code);
       }
       setCreateKind(null);
@@ -4335,55 +4365,7 @@ function DocumentEditor({
   };
   return (
     <form className="document-editor" onSubmit={onSave}>
-      <div className="document-editor-heading">
-        <div>
-          <button
-            type="button"
-            className="text-button product-back"
-            onClick={onCancel}
-          >
-            ← Retour
-          </button>
-          <span className="eyebrow">
-            {isOrder ? "BON DE COMMANDE" : "RÉCEPTION"}
-          </span>
-          <h2>
-            {isEditing ? "Modifier" : "Créer"}{" "}
-            {isOrder ? "un bon de commande" : "une réception"}
-          </h2>
-          <p>
-            {isOrder
-              ? `État : ${order?.status || "Brouillon"}`
-              : linkedOrder
-                ? `Réception du bon ${linkedOrder.number}`
-                : "Réception par facture"}
-          </p>
-        </div>
-      </div>
-      <section className="panel document-editor-searches">
-        <SearchCombobox
-          label="Rechercher un produit"
-          value={productQuery}
-          onChange={setProductQuery}
-          items={visibleProducts.slice(0, 8)}
-          itemLabel={(product) => `${product.code} · ${productName(product)}`}
-          onPick={chooseProduct}
-          onCreate={() => {
-            setNewProduct({
-              name: productQuery,
-              volume: "",
-              category: "",
-              variant: "",
-              code: "",
-              unitsPerCase: 6,
-            });
-            setProductCodeEdited(false);
-            setCreateKind("product");
-            setCreateError("");
-          }}
-          createLabel="Créer un produit"
-          disabled={readOnly || locked}
-        />
+      <section className="panel document-editor-party">
         <SearchCombobox
           label="Rechercher un fournisseur"
           value={supplierQuery}
@@ -4413,15 +4395,32 @@ function DocumentEditor({
           createLabel="Créer un fournisseur"
           disabled={readOnly || locked}
         />
-        {fields.supplierId && (
-          <div className="document-editor-selected">
-            Fournisseur :{" "}
-            <strong>
-              {suppliers.find((row) => row.id === fields.supplierId)?.name ||
-                "Introuvable"}
-            </strong>
-          </div>
-        )}
+        <div className="document-party-summary">
+          <span>{isOrder ? `Fournisseur · ${order?.status || "Brouillon"}` : linkedOrder ? `Fournisseur · PO ${linkedOrder.number}` : "Fournisseur"}</span>
+          <strong>{selectedSupplier?.name || "Aucun fournisseur sélectionné"}</strong>
+          {selectedSupplier?.phone && <small>{selectedSupplier.phone}</small>}
+          {selectedSupplier?.address && <small>{selectedSupplier.address}</small>}
+        </div>
+      </section>
+      <section className="panel document-editor-searches">
+        <SearchCombobox
+          label="Rechercher un produit"
+          value={productQuery}
+          onChange={setProductQuery}
+          items={visibleProducts.slice(0, 8)}
+          itemLabel={(product) => `${product.code} · ${productName(product)}`}
+          onPick={chooseProduct}
+          onCreate={() => {
+            setNewProduct({ name: productQuery, volume: "", category: "", variant: "", code: "", unitsPerCase: 6 });
+            setProductQuery("");
+            setProductCodeEdited(false);
+            setCreateKind("product");
+            setCreateError("");
+          }}
+          createLabel="Créer un produit"
+          preventEnterSubmit
+          disabled={readOnly || locked}
+        />
       </section>
       {createKind && (
         <section className="panel document-editor-create">
@@ -4560,23 +4559,8 @@ function DocumentEditor({
         </section>
       )}
       <section className="panel document-editor-info">
-        <div className="document-editor-fields">
-          <Field
-            label={isOrder ? "Date du bon" : "Date de réception"}
-            type="date"
-            value={fields.date}
-            onChange={(value) => onField("date", value)}
-            disabled={readOnly}
-            required
-          />
-          <Field
-            label={isOrder ? "N° PO" : "N° facture"}
-            value={fields.number}
-            onChange={(value) => onField("number", value)}
-            disabled={readOnly}
-            required={!isEditing}
-          />
-          {!isOrder && (
+        {!isOrder && (
+          <div className="document-editor-fields">
             <label className="field">
               <span>Bon de commande lié</span>
               <select
@@ -4597,8 +4581,8 @@ function DocumentEditor({
                   ))}
               </select>
             </label>
-          )}
-        </div>
+          </div>
+        )}
         <Field
           label={isOrder ? "Notes du bon" : "Notes facture"}
           value={fields.note}
@@ -4607,123 +4591,34 @@ function DocumentEditor({
         />
       </section>
       {isOrder ? (
-        <section className="panel document-editor-products">
+        <section className="panel receipt-items document-editor-products">
           <div className="panel-head wrap">
             <div>
-              <h3>Catalogue de produits</h3>
-              <p>
-                Clique sur un produit pour l’ajouter, puis déplie sa ligne pour
-                saisir les quantités et le prix.
-              </p>
+              <h3>Produits commandés</h3>
+              <p>Choisis un produit dans la recherche, puis saisis les caisses et le prix prévu.</p>
             </div>
             <span className="document-editor-count">
-              {visibleProducts.length} résultat(s)
+              {fields.lines.length} ligne(s)
             </span>
           </div>
-          <div className="document-editor-catalog">
-            {visibleProducts.map((product) => {
-              const index = fields.lines.findIndex(
-                (line) =>
-                  line.search.toLocaleLowerCase("fr") ===
-                  product.code.toLocaleLowerCase("fr"),
-              );
-              const line = fields.lines[index];
-              const expanded = line && expandedCode === product.code;
-              return (
-                <div
-                  className={`document-editor-item${line ? " is-selected" : ""}`}
-                  key={product.code}
-                >
-                  <div className="document-editor-item-top">
-                    <button
-                      type="button"
-                      className="document-editor-item-main"
-                      onClick={() =>
-                        line
-                          ? setExpandedCode(expanded ? "" : product.code)
-                          : chooseProduct(product)
-                      }
-                    >
-                      <strong>{productName(product)}</strong>
-                      <small>
-                        {product.code} · {product.unitsPerCase} unités/caisse
-                      </small>
-                    </button>
-                    {line && (
-                      <span className="document-editor-item-amount">
-                        {money(
-                          Number(line.cases || 0) * Number(line.casePrice || 0),
-                        )}
-                      </span>
-                    )}
-                    {line ? (
-                      <button
-                        type="button"
-                        className="secondary"
-                        aria-expanded={Boolean(expanded)}
-                        onClick={() =>
-                          setExpandedCode(expanded ? "" : product.code)
-                        }
-                      >
-                        {expanded ? "Réduire" : "Détails"}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={readOnly || locked}
-                        onClick={() => chooseProduct(product)}
-                      >
-                        <Plus size={15} /> Ajouter
-                      </button>
-                    )}
-                  </div>
-                  {expanded && (
-                    <div className="document-editor-item-detail">
-                      <Field
-                        label="Caisses"
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={line.cases}
-                        onChange={(value) => onLine(index, "cases", value)}
-                        disabled={readOnly || locked}
-                        required
-                      />
-                      <Field
-                        label="Prix par caisse (G)"
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={line.casePrice}
-                        onChange={(value) => onLine(index, "casePrice", value)}
-                        disabled={readOnly || locked}
-                        required
-                      />
-                      {!isOrder && (
-                        <Field
-                          label="Note de ligne"
-                          value={line.note}
-                          onChange={(value) => onLine(index, "note", value)}
-                        />
-                      )}
-                      <button
-                        type="button"
-                        className="icon-button danger"
-                        aria-label={`Retirer ${productName(product)}`}
-                        disabled={readOnly || locked}
-                        onClick={() => onDeleteLine(index)}
-                      >
-                        <Trash2 size={17} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {!visibleProducts.length && (
-              <Empty text="Aucun produit trouvé. Utilise « Créer un produit » dans la recherche." />
-            )}
+          <div className="receipt-table-wrap">
+            <table className="receipt-table">
+              <thead><tr><th>Code</th><th>Produit</th><th>Variante</th><th>Format</th><th>Caisses</th><th>Prix/caisse</th><th>Total ligne</th><th><span className="sr-only">Action</span></th></tr></thead>
+              <tbody>{fields.lines.map((line, index) => {
+                const product = catalog.find((item) => item.code.toLocaleLowerCase("fr") === String(line.search).toLocaleLowerCase("fr"));
+                return <tr key={line.id}>
+                  <td data-label="Code" className="receipt-code">{product?.code || line.search}</td>
+                  <td data-label="Produit"><strong>{product ? product.brand || productName(product) : "Produit à choisir"}</strong></td>
+                  <td data-label="Variante">{product?.variant || "—"}</td>
+                  <td data-label="Format">{product?.format || product?.volume || "—"}</td>
+                  <td data-label="Caisses"><Field label={`Caisses, ligne ${index + 1}`} type="number" min="1" step="1" value={line.cases} onChange={(value) => onLine(index, "cases", value)} disabled={readOnly || locked} required /></td>
+                  <td data-label="Prix/caisse"><Field label={`Prix par caisse, ligne ${index + 1}`} type="number" min="0.01" step="0.01" value={line.casePrice} onChange={(value) => onLine(index, "casePrice", value)} disabled={readOnly || locked} required /></td>
+                  <td data-label="Total ligne" className="receipt-line-total">{money(Number(line.cases || 0) * Number(line.casePrice || 0))}</td>
+                  <td className="receipt-remove"><button type="button" className="icon-button danger" aria-label={`Retirer la ligne ${index + 1}`} disabled={readOnly || locked} onClick={() => onDeleteLine(index)}><Trash2 size={16} /></button></td>
+                </tr>;
+              })}</tbody>
+            </table>
+            {!fields.lines.length && <Empty text="Aucun produit sélectionné. Utilise la recherche pour ajouter une ligne." />}
           </div>
         </section>
       ) : (
@@ -4847,6 +4742,10 @@ function DocumentEditor({
         </section>
       )}
       <footer className="document-editor-footer">
+        <div className="document-editor-footer-fields">
+          <Field label={isOrder ? "Date du bon" : "Date de réception"} type="date" value={fields.date} onChange={(value) => onField("date", value)} disabled={readOnly} required />
+          <Field label={isOrder ? "N° PO" : "N° facture"} value={fields.number} onChange={(value) => onField("number", value)} disabled={readOnly} required={!isEditing} />
+        </div>
         <div className="document-editor-totals">
           <span>
             {fields.lines.length} produit(s) · {selectedCases} caisse(s)
@@ -4919,6 +4818,7 @@ function SearchCombobox({
   onPick,
   onCreate,
   createLabel,
+  preventEnterSubmit = false,
   disabled = false,
 }) {
   const [open, setOpen] = useState(false);
@@ -4942,7 +4842,12 @@ function SearchCombobox({
         ),
       );
     }
-    if (event.key === "Enter" && open) {
+    if (event.key === "Enter" && preventEnterSubmit && !value.trim()) {
+      event.preventDefault();
+      setOpen(false);
+      return;
+    }
+    if (event.key === "Enter" && (open || preventEnterSubmit)) {
       event.preventDefault();
       if (active < items.length) onPick(items[active]);
       else onCreate();

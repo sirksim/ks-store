@@ -19,6 +19,13 @@ test('purchase order and receipt editor routes round trip', () => {
   assert.deepEqual(parseRoute(pathFor('invoiceEditor', 'fact/é')), { page: 'invoiceEditor', id: 'fact/é' })
 })
 
+test('sale detail and editor routes round trip', () => {
+  for (const [page, id] of [['saleDetail', 'sale 1'], ['saleEditor', 'sale 1'], ['saleEditor', null]]) {
+    const path = pathFor(page, id)
+    assert.deepEqual(parseRoute(path), { page, id })
+  }
+})
+
 test('table query restores search, filters, sorting, page and hidden columns', () => {
   const columns = [{ accessorKey: 'number' }, { accessorKey: 'date' }, { id: 'actions' }]
   const state = readTableQuery('?q=vin&filter.number=ABC&sort=date:desc&hide=number&page=3', columns)

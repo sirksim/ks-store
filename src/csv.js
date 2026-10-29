@@ -12,7 +12,7 @@ const selectedCell = (kind, item, id) => {
   if (id === 'lineCount') return item.lines.length
   if (id === 'publicationStatus') return item.published ? 'Publié' : 'Non publié'
   if (id === 'publishedCount') return item.variants.filter(variant => variant.published).length
-  if (id === 'productName' && kind === 'ventes') return item.product ? productName(item.product) : item.productCode
+  if (id === 'productName' && kind === 'ventes') return item.lines.map(line => line.product ? productName(line.product) : line.productCode).join(', ')
   if (id === 'supplierName') return item.supplier?.name || ''
   if (id === 'variance') return item.hasVariance ? 'Écart' : ''
   const value = item[id]
@@ -51,6 +51,12 @@ export function selectedTableRows(kind, items, visibleColumns) {
       ])),
     ]
   }
+  if (kind === 'ventes') return [
+    [...headers, 'N° vente', 'Code produit', 'Produit', 'Quantité ligne', 'Prix réel/unité (G)', 'Total ligne (G)', 'Coût ligne (G)', 'Bénéfice ligne (G)'],
+    ...items.flatMap(sale => sale.lines.map(line => [...values(sale), sale.number, line.productCode,
+      line.product ? productName(line.product) : line.productCode, line.quantity, decimal(line.unitPrice),
+      decimal(line.revenue), line.validCost ? decimal(line.cost) : '', line.validCost ? decimal(line.profit) : '']))
+  ]
   return [headers, ...items.map(values)]
 }
 
@@ -97,8 +103,11 @@ export function reportRows(kind, state) {
       ]
     case 'ventes':
       return [
-        ['Date', 'N° commande', 'Client', 'Référence libre', 'Code', 'Nom complet', 'Quantité', 'Prix réel/unité (G)', 'Coût unitaire à la date (G)', 'Total vente (G)', 'Coût total (G)', 'Bénéfice brut réel (G)', 'Marge réelle (%)', 'Statut', 'Mode de paiement', 'Notes'],
-        ...report.sales.map(s => [s.date, s.order, s.customerName, s.client, s.productCode, s.product ? productName(s.product) : '', s.quantity, decimal(s.unitPrice), s.validCost ? decimal(s.unitCost) : '', decimal(s.revenue), s.validCost ? decimal(s.cost) : '', s.validCost ? decimal(s.profit) : '', s.validCost ? decimal(s.margin) : '', s.status, s.payment, s.note]),
+        ['Date', 'N° vente', 'N° commande', 'Client', 'Référence libre', 'Code', 'Nom complet', 'Quantité ligne', 'Prix réel/unité (G)', 'Coût unitaire à la date (G)', 'Total ligne (G)', 'Total vente (G)', 'Coût ligne (G)', 'Bénéfice ligne (G)', 'Marge ligne (%)', 'Statut', 'Mode de paiement', 'Notes'],
+        ...report.sales.flatMap(s => s.lines.map(line => [s.date, s.number, s.order, s.customerName, s.client, line.productCode,
+          line.product ? productName(line.product) : '', line.quantity, decimal(line.unitPrice), line.validCost ? decimal(line.unitCost) : '',
+          decimal(line.revenue), decimal(s.revenue), line.validCost ? decimal(line.cost) : '', line.validCost ? decimal(line.profit) : '',
+          line.validCost ? decimal(line.margin) : '', s.status, s.payment, s.note])),
       ]
     case 'fournisseurs':
     case 'clients': {

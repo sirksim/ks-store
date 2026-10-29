@@ -32,12 +32,24 @@
   body { background: #fff; color: #111; }
   .app-shell { display: block; min-height: 0; }
   .app-shell > .sidebar, .app-shell > .main, .app-shell > .toast { display: none !important; }
-  .print-order { display: block; padding: 18mm 12mm; font: 12px Arial, sans-serif; }
-  .print-header { display: flex; justify-content: space-between; gap: 28px; margin-bottom: 26px; }
-  .print-header h1 { font-size: 22px; margin: 10px 0; }
+  .print-order { display: block; padding: 12mm; font: 12px 'DM Sans', Arial, sans-serif; color: #203042; }
+  .print-header { display: flex; justify-content: space-between; gap: 28px; align-items: start; border-bottom: 1px solid #dce6e9; padding: 15px 0 20px; margin-bottom: 22px; }
+  .print-header>div { flex: 1; }
+  .print-brand { display: inline-block; background: #14283c; color: #fff; padding: 7px 10px; border-radius: 5px; letter-spacing: .1em; }
+  .print-header h1 { font: 800 22px Manrope, Arial, sans-serif; margin: 12px 0 8px; }
   .print-header p { margin: 5px 0; }
-  .print-order table { width: 100%; border-collapse: collapse; }
-  .print-order th, .print-order td { border: 1px solid #888; padding: 8px; text-align: left; }
-  .print-order th { background: #edf2f4; }
-  .print-total { text-align: right; font-size: 16px; font-weight: 700; margin-top: 18px; }
+  .print-supplier { text-align: right; }
+  .print-supplier span,.print-supplier strong { display: block; }
+  .print-supplier span { color: #637789; text-transform: uppercase; font-size: 10px; letter-spacing: .08em; }
+  .print-supplier strong { margin-top: 6px; font-size: 14px; }
+  .print-order table { width: 100%; min-width: 0; border-collapse: collapse; }
+  .print-order th, .print-order td { border-bottom: 1px solid #dce6e9; padding: 10px 8px; text-align: left; white-space: normal; }
+  .print-order th { background: #eaf0f2 !important; color: #526b78; }
+  .print-order tbody tr:nth-child(even) { background: #f5f8f9 !important; }
+  .print-order td small { display: block; color: #637789; margin-top: 4px; }
+  .print-summary { display: flex; justify-content: space-between; gap: 20px; align-items: center; border-top: 1px solid #dce6e9; padding: 15px 8px; background: #f3f7f8 !important; }
+  .print-summary strong { font-size: 17px; }
+  .print-note { margin-top: 20px; white-space: pre-wrap; }
+  .print-order thead { display: table-header-group; }
+  .print-order tr { break-inside: avoid; }
 }
