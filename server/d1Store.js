@@ -1,4 +1,4 @@
-import { derive, normalizeState } from '../src/data.js'
+import { derive, normalizeState, saleLines, saleNumber } from '../src/data.js'
 
 const COLLECTIONS = ['families', 'products', 'invoices', 'suppliers', 'customers', 'purchaseOrders', 'sales', 'expenses']
 const idFor = (kind, row) => kind === 'products' ? row.code : row.id
@@ -6,11 +6,18 @@ const bad = (message, status = 400) => Object.assign(new Error(message), { statu
 
 function invalidReference({ kind, id, payload, deleted }, state) {
   const exists = (collection, target) => !target || state[collection].some(row => String(idFor(collection, row)) === String(target))
+  if (kind === 'invoices') {
+    const invoices = deleted ? state.invoices.filter(row => row.id !== id) : [...state.invoices.filter(row => row.id !== id), payload]
+    const receipts = derive({ ...state, invoices }).receipts
+    if (state.sales.some(sale => sale.status === 'Confirmée/Vendue' && saleLines(sale).some(line =>
+      !receipts.some(receipt => receipt.productCode === line.productCode && receipt.date <= sale.date))))
+      return 'Cette réception est nécessaire à une vente confirmée.'
+  }
   if (kind === 'settings' && deleted) return 'Les paramètres ne peuvent pas être supprimés.'
   if (deleted) {
     if (kind === 'families' && state.products.some(row => row.familyId === id)) return 'Cette fiche contient encore des variantes.'
     if (kind === 'products' && (state.invoices.some(row => row.lines?.some(line => line.productCode === id)) ||
-      state.purchaseOrders.some(row => row.lines?.some(line => line.productCode === id)) || state.sales.some(row => row.productCode === id))) return 'Ce produit est utilisé par une opération.'
+      state.purchaseOrders.some(row => row.lines?.some(line => line.productCode === id)) || state.sales.some(row => saleLines(row).some(line => line.productCode === id)))) return 'Ce produit est utilisé par une opération.'
     if (kind === 'suppliers' && (state.invoices.some(row => row.supplierId === id) || state.purchaseOrders.some(row => row.supplierId === id))) return 'Ce fournisseur est utilisé par une opération.'
     if (kind === 'customers' && state.sales.some(row => row.customerId === id)) return 'Ce client est utilisé par une vente.'
     if (kind === 'purchaseOrders' && state.invoices.some(row => row.purchaseOrderId === id)) return 'Ce PO possède des factures liées.'
@@ -21,7 +28,16 @@ function invalidReference({ kind, id, payload, deleted }, state) {
     payload.lines?.some(line => !exists('products', line.productCode)))) return 'Une référence de cette facture est introuvable.'
   if (kind === 'purchaseOrders' && (!exists('suppliers', payload.supplierId) || payload.lines?.some(line => !exists('products', line.productCode)))) return 'Une référence de ce PO est introuvable.'
   if (kind === 'purchaseOrders' && state.purchaseOrders.some(row => row.id !== id && row.number?.toLocaleLowerCase('fr') === payload.number?.toLocaleLowerCase('fr'))) return 'Ce numéro de PO existe déjà.'
-  if (kind === 'sales' && (!exists('customers', payload.customerId) || !exists('products', payload.productCode))) return 'Une référence de cette vente est introuvable.'
+  if (kind === 'sales' && (!exists('customers', payload.customerId) || !Array.isArray(payload.lines) || !payload.lines.length ||
+    payload.lines.some(line => !exists('products', line.productCode) || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1 ||
+      !Number.isFinite(Number(line.unitPrice)) || Number(line.unitPrice) <= 0))) return 'Une ligne de cette vente est invalide.'
+  if (kind === 'sales' && !(payload.number === `LEGACY-${id}` && state.sales.some(row => row.id === id && (!row.number || row.number === payload.number))) &&
+    (!/^\d{8}-\d{3}$/.test(payload.number || '') ||
+      payload.number.slice(0, 8) !== String(payload.date || '').replaceAll('-', ''))) return 'Numéro de vente invalide.'
+  if (kind === 'sales' && state.sales.some(row => row.id !== id && saleNumber(row) === payload.number)) return 'Ce numéro de vente existe déjà.'
+  if (kind === 'sales' && payload.status === 'Confirmée/Vendue' && saleLines(payload).some(line =>
+    !derive(state).receipts.some(receipt => receipt.productCode === line.productCode && receipt.date <= payload.date)))
+    return 'Réception manquante à la date de cette vente.'
   return null
 }
 
@@ -108,8 +124,8 @@ export function createD1Store(db) {
   }
   const shareStatus = async (kind, id) => Boolean(await db.prepare('SELECT 1 FROM shares WHERE kind=? AND id=? AND active=1').bind(kind, id).first())
   const createShare = async (kind, id, tokenHash) => {
-    if (!['invoice', 'order'].includes(kind)) throw bad('Type de document invalide.')
-    const collection = kind === 'invoice' ? 'invoices' : 'purchaseOrders'
+    if (!['invoice', 'order', 'sale'].includes(kind)) throw bad('Type de document invalide.')
+    const collection = kind === 'invoice' ? 'invoices' : kind === 'sale' ? 'sales' : 'purchaseOrders'
     const row = await db.prepare('SELECT deleted FROM records WHERE kind=? AND id=?').bind(collection, id).first()
     if (!row || row.deleted) throw bad('Document introuvable.', 404)
     await db.batch([
@@ -123,7 +139,8 @@ export function createD1Store(db) {
     if (!share) return null
     const report = derive((await readState()).state)
     const document = share.kind === 'invoice' ? report.invoices.find(row => row.id === share.id)
-      : report.purchaseOrders.find(row => row.id === share.id)
+      : share.kind === 'sale' ? report.sales.find(row => row.id === share.id)
+        : report.purchaseOrders.find(row => row.id === share.id)
     return document ? { kind: share.kind, document } : null
   }
   const publicCatalog = async () => {

@@ -17,6 +17,21 @@ export const cloneInitial = () => structuredClone(initialState)
 export const uid = () => globalThis.crypto?.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(36).slice(2)}`
 export const productName = product => [product.brand, product.variant, product.format].filter(Boolean).join(' ')
 export const shortName = product => [product.brand, product.variant].filter(Boolean).join(' ')
+export const saleLines = sale => Array.isArray(sale.lines) ? sale.lines : [{
+  id: `legacy-${sale.id}`, productCode: sale.productCode, quantity: sale.quantity, unitPrice: sale.unitPrice,
+}]
+export const saleNumber = sale => sale.number || `LEGACY-${sale.id}`
+export function nextSaleNumber(sales, date, random = Math.random, excludeId = null) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Date de vente invalide.')
+  const prefix = date.replaceAll('-', '')
+  const used = new Set(sales.filter(sale => sale.id !== excludeId).map(sale => saleNumber(sale)))
+  const start = Math.floor(random() * 1000)
+  for (let offset = 0; offset < 1000; offset++) {
+    const number = `${prefix}-${String((start + offset) % 1000).padStart(3, '0')}`
+    if (!used.has(number)) return number
+  }
+  throw new Error('Les 1 000 numéros de vente de cette date sont utilisés.')
+}
 
 const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 export const productCodePrefix = category => String(category || '').normalize('NFD')
@@ -97,8 +112,11 @@ export function normalizeState(saved) {
       row.lines.some(line => !object(line) || !identifier(line.id) || !products.has(line.productCode))) ||
     saved.purchaseOrders.some(row => !Array.isArray(row.lines) || (row.supplierId && !suppliers.has(row.supplierId)) ||
       row.lines.some(line => !object(line) || !identifier(line.id) || !products.has(line.productCode))) ||
-    saved.sales.some(row => !Object.hasOwn(row, 'customerId') || !products.has(row.productCode) ||
-      (row.customerId && !customers.has(row.customerId)))) return null
+    saved.sales.some(row => !Object.hasOwn(row, 'customerId') ||
+      (row.customerId && !customers.has(row.customerId)) || !saleLines(row).length ||
+      saleLines(row).some(line => !products.has(line.productCode) || !Number.isInteger(Number(line.quantity)) ||
+        Number(line.quantity) < 1 || !Number.isFinite(Number(line.unitPrice)) || Number(line.unitPrice) <= 0)) ||
+    new Set(saved.sales.map(saleNumber)).size !== saved.sales.length) return null
   const upgraded = upgradeProductFamilies(saved)
   const variantKeys = upgraded.products.map(product => [product.familyId, searchKey(product.variant), searchKey(product.format)].join('|'))
   if (upgraded.products.some(product => !identifier(product.format)) || new Set(variantKeys).size !== variantKeys.length) return null
@@ -202,8 +220,9 @@ export function derive(state) {
   })
   const rowMap = new Map(productRows.map(row => [row.code, row]))
   const sales = (state.sales || []).map(sale => {
-    const product = lookup.get(sale.productCode)
-    const history = historyMap.get(sale.productCode) || []
+    const lines = saleLines(sale).map(line => {
+    const product = lookup.get(line.productCode)
+    const history = historyMap.get(line.productCode) || []
     let low = 0
     let high = history.length
     while (low < high) {
@@ -214,8 +233,8 @@ export function derive(state) {
     const unitsAtDate = low ? history[low - 1].units : 0
     const costAtDate = low ? history[low - 1].cost : 0
     const unitCost = unitsAtDate ? costAtDate / unitsAtDate : 0
-    const quantity = Number(sale.quantity) || 0
-    const price = Number(sale.unitPrice) || 0
+    const quantity = Number(line.quantity) || 0
+    const price = Number(line.unitPrice) || 0
     const revenue = quantity * price
     const cost = quantity * unitCost
     const profit = revenue - cost
@@ -227,10 +246,18 @@ export function derive(state) {
       row.profit += profit
       row.stock -= quantity
     }
-    return { ...sale, customerName: customers.get(sale.customerId)?.name || '',
-      product, unitCost, revenue, cost, profit, margin, validCost }
+    return { ...line, product, quantity, unitPrice: price, unitCost, revenue, cost, profit, margin, validCost }
+    })
+    const revenue = lines.reduce((sum, line) => sum + line.revenue, 0)
+    const cost = lines.reduce((sum, line) => sum + line.cost, 0)
+    const profit = revenue - cost
+    return { ...sale, number: saleNumber(sale), lines, customerName: customers.get(sale.customerId)?.name || '',
+      quantity: lines.reduce((sum, line) => sum + line.quantity, 0), revenue, cost, profit,
+      margin: revenue ? profit / revenue * 100 : 0, validCost: lines.every(line => line.validCost),
+      product: lines[0]?.product, productCode: lines[0]?.productCode, unitPrice: lines[0]?.unitPrice,
+      unitCost: lines[0]?.unitCost }
   })
-  const confirmed = sales.filter(sale => sale.status === 'Confirmée/Vendue' && sale.product && sale.validCost)
+  const confirmed = sales.filter(sale => sale.status === 'Confirmée/Vendue' && sale.validCost && sale.lines.every(line => line.product))
   const revenue = confirmed.reduce((sum, sale) => sum + sale.revenue, 0)
   const costSold = confirmed.reduce((sum, sale) => sum + sale.cost, 0)
   const grossProfit = confirmed.reduce((sum, sale) => sum + sale.profit, 0)

@@ -6,13 +6,14 @@ export const listPaths = {
 
 const details = {
   productDetail: '/products/', supplierDetail: '/suppliers/', customerDetail: '/customers/',
-  orderDetail: '/purchase-orders/', invoiceDetail: '/invoices/',
+  orderDetail: '/purchase-orders/', invoiceDetail: '/invoices/', saleDetail: '/sales/',
 }
 
 export function pathFor(page, id) {
   if (listPaths[page]) return `/admin${listPaths[page]}`
   if (page === 'orderEditor') return id ? `/admin/purchase-orders/${encodeURIComponent(id)}/edit` : '/admin/purchase-orders/new'
   if (page === 'invoiceEditor') return id ? `/admin/receipts/${encodeURIComponent(id)}/edit` : '/admin/receipts/new'
+  if (page === 'saleEditor') return id ? `/admin/sales/${encodeURIComponent(id)}/edit` : '/admin/sales/new'
   return details[page] && id ? `/admin${details[page]}${encodeURIComponent(id)}` : '/admin/'
 }
 
@@ -22,7 +23,8 @@ export function parseRoute(pathname) {
   if (list) return { page: list[0], id: null }
   if (path === '/purchase-orders/new') return { page: 'orderEditor', id: null }
   if (path === '/receipts/new') return { page: 'invoiceEditor', id: null }
-  for (const [page, pattern] of [['orderEditor', /^\/purchase-orders\/([^/]+)\/edit$/], ['invoiceEditor', /^\/receipts\/([^/]+)\/edit$/]]) {
+  if (path === '/sales/new') return { page: 'saleEditor', id: null }
+  for (const [page, pattern] of [['orderEditor', /^\/purchase-orders\/([^/]+)\/edit$/], ['invoiceEditor', /^\/receipts\/([^/]+)\/edit$/], ['saleEditor', /^\/sales\/([^/]+)\/edit$/]]) {
     const match = pattern.exec(path)
     if (match) {
       try { return { page, id: decodeURIComponent(match[1]) } } catch { return { page: 'notFound', id: null } }

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { hasLinkedReceipts, orderStageForAction, prepareInlineProduct, prepareInlineSupplier } from './documentWorkflow.js'
+import { hasLinkedReceipts, orderStageForAction, saleStatusForAction, prepareInlineProduct, prepareInlineSupplier } from './documentWorkflow.js'
 
 test('purchase order transitions require the corresponding action', () => {
   assert.equal(orderStageForAction('draft', 'save'), 'draft')
@@ -12,6 +12,17 @@ test('purchase order transitions require the corresponding action', () => {
   assert.equal(orderStageForAction('ordered', 'cancel', true), null)
   assert.equal(orderStageForAction('cancelled', 'command'), null)
   assert.equal(orderStageForAction('cancelled', 'receive'), null)
+})
+
+test('sale actions advance status and allow reopening', () => {
+  assert.equal(saleStatusForAction('En attente', 'save'), 'En attente')
+  assert.equal(saleStatusForAction('En attente', 'sell'), 'Confirmée/Vendue')
+  assert.equal(saleStatusForAction('En attente', 'cancel'), null)
+  assert.equal(saleStatusForAction('Confirmée/Vendue', 'save'), 'Confirmée/Vendue')
+  assert.equal(saleStatusForAction('Confirmée/Vendue', 'cancel'), 'Annulée')
+  assert.equal(saleStatusForAction('Confirmée/Vendue', 'reopen'), 'En attente')
+  assert.equal(saleStatusForAction('Annulée', 'reopen'), 'En attente')
+  assert.equal(saleStatusForAction('Annulée', 'sell'), null)
 })
 
 test('new orders do not inherit unlinked invoices', () => {

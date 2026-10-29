@@ -17,3 +17,22 @@
 .sync-banner{background:#fff4df;color:#73522b;border:1px solid #f0dfbb;border-radius:9px;padding:10px 14px;margin-bottom:16px;font-size:12px;font-weight:700}
 .sync-overlay{position:fixed;inset:0;background:#14283c99;z-index:1000;display:grid;place-items:center;padding:20px}.sync-panel{width:min(760px,100%);max-height:90vh;overflow:auto}.sync-panel h2{margin:8px 0}.sync-panel>.secondary{margin-top:18px}.sync-conflict{border-top:1px solid #dce6e9;margin-top:15px;padding-top:15px}.sync-versions{display:grid;grid-template-columns:1fr 1fr;gap:12px}.sync-versions>div{min-width:0}.sync-versions pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;background:#f5f9fa;padding:10px;font-size:11px}.sync-conflict .entry-actions{display:flex;gap:8px;flex-wrap:wrap}
 @media(max-width:600px){.sync-versions{grid-template-columns:1fr}.share-actions input{max-width:100%}}
+
+.document-workspace>.panel:first-of-type{border-top:1px solid var(--ks-border)}
+.document-workspace .document-facts{background:#f3f7f8;border:1px solid #e0e9eb;border-radius:10px;padding:10px;gap:10px}
+.document-workspace .document-facts>div{background:#fff}
+.document-workspace .document-items .document-line-head,.document-workspace .document-items .document-line{display:grid;grid-template-columns:minmax(180px,2fr) minmax(140px,1.2fr) minmax(130px,1fr) minmax(120px,1fr);gap:14px;align-items:center;padding:12px 16px}
+.document-workspace .document-items .document-line-head{background:#eaf0f2;color:#526b78;text-transform:uppercase;letter-spacing:.06em;font-size:10px;font-weight:800}
+.document-workspace .document-items .document-line{border-top:1px solid #e0e9eb}
+.document-workspace .document-items .document-line:nth-of-type(odd){background:#f6f9fa}
+.document-workspace .document-items .document-line-values{display:contents}
+.document-workspace .document-items .document-line-values>*{min-width:0;text-align:right}
+.document-workspace .document-items .document-variance{grid-column:2 / -1;text-align:right}
+.document-workspace .document-items .document-total{background:#f3f7f8;margin-top:0;padding:18px 16px;border-top:1px solid var(--ks-border);font-size:16px}
+@media(max-width:760px){
+  .document-workspace .document-items .document-line-head{display:none}
+  .document-workspace .document-items .document-line{grid-template-columns:1fr 1fr;gap:10px;border:1px solid #e0e9eb;border-radius:9px;margin-top:10px}
+  .document-workspace .document-items .document-line>div:first-child{grid-column:1 / -1}
+  .document-workspace .document-items .document-line-values>*{text-align:left}
+  .document-workspace .document-items .document-variance{grid-column:1 / -1;text-align:left}
+}

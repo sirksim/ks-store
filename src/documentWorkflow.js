@@ -8,6 +8,14 @@ export function orderStageForAction(previousStage, action, hasReceipts = false) 
   return null
 }
 
+export function saleStatusForAction(previousStatus, action) {
+  if (action === 'save' && ['En attente', 'Confirmée/Vendue', 'Annulée'].includes(previousStatus)) return previousStatus
+  if (action === 'sell' && previousStatus === 'En attente') return 'Confirmée/Vendue'
+  if (action === 'cancel' && previousStatus === 'Confirmée/Vendue') return 'Annulée'
+  if (action === 'reopen' && ['Confirmée/Vendue', 'Annulée'].includes(previousStatus)) return 'En attente'
+  return null
+}
+
 export function hasLinkedReceipts(orderId, invoices) {
   return Boolean(orderId) && invoices.some(invoice => invoice.purchaseOrderId === orderId)
 }

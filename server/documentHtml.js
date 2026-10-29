@@ -4,6 +4,10 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
 
 export function renderDocument({ kind, document }) {
+  if (kind === 'sale') {
+    const rows = document.lines.map(line => `<tr><td>${escapeHtml(line.product ? productName(line.product) : line.productCode)}</td><td>${escapeHtml(line.quantity)}</td><td>${escapeHtml(money(line.unitPrice))}</td><td>${escapeHtml(money(line.revenue))}</td></tr>`).join('')
+    return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(document.number)} · Vente KS</title><style>body{font:15px system-ui,sans-serif;color:#19394d;max-width:900px;margin:30px auto;padding:0 18px}table{border-collapse:collapse;width:100%;margin-top:20px}th,td{text-align:left;border-bottom:1px solid #dce6e9;padding:12px 8px}.total{text-align:right;font-weight:700}</style></head><body><small>KS · Document partagé en lecture seule</small><h1>Vente ${escapeHtml(document.number)}</h1><p>${escapeHtml(document.date)} · Client : ${escapeHtml(document.customerName || document.client || 'Non précisé')}</p><p>Statut : ${escapeHtml(document.status)} · Paiement : ${escapeHtml(document.payment || 'Non précisé')}</p><table><thead><tr><th>Produit</th><th>Unités</th><th>Prix/unité</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><p class="total">Total : ${escapeHtml(money(document.revenue))}</p></body></html>`
+  }
   const isInvoice = kind === 'invoice'
   const title = isInvoice ? `Facture ${document.number || 'Sans numéro'}` : `PO ${document.number}`
   const supplier = isInvoice ? document.supplier || 'Non précisé' : document.supplier?.name || 'Non précisé'

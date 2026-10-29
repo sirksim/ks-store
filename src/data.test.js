@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { STORAGE_KEY, catalogProducts, cloneInitial, derive, findProduct, generateProductCode, loadState, nextPurchaseOrderNumber, normalizeState, productCodePrefix } from './data.js'
+import { STORAGE_KEY, catalogProducts, cloneInitial, derive, findProduct, generateProductCode, loadState, nextPurchaseOrderNumber, nextSaleNumber, normalizeState, productCodePrefix } from './data.js'
 import { encodeCsv, reportRows, selectedTableRows } from './csv.js'
 import { updateFilteredSelection } from './tableSelection.js'
 
@@ -43,6 +43,8 @@ test('family, receipt, sale and expense calculations use current data', () => {
     quantity: 2, unitPrice: 800, status: 'Confirmée/Vendue' })
   state.expenses.push({ id: 'expense-1', date: '2026-10-21', category: 'Transport', amount: 100 })
   const report = derive(state)
+  assert.equal(report.sales[0].number, 'LEGACY-sale-1')
+  assert.equal(report.sales[0].lines.length, 1)
   assert.equal(report.products[0].stock, 4)
   assert.equal(report.totals.revenue, 1600)
   assert.equal(report.totals.net, 500)
@@ -54,6 +56,7 @@ test('later receipts leave historical sale cost unchanged', () => {
   state.sales.push({ id: 'sale-1', date: '2026-10-21', productCode: 'TEST-1', customerId: null,
     quantity: 1, unitPrice: 800, status: 'Confirmée/Vendue' })
   const before = derive(state).sales[0].unitCost
+  assert.equal(before, 500)
   state.invoices.push({ id: 'invoice-2', date: '2026-10-22', supplierId: null, purchaseOrderId: null,
     number: 'TEST-2', lines: [{ id: 'line-2', productCode: 'TEST-1', cases: 1, casePrice: 6000 }] })
   assert.equal(derive(state).sales[0].unitCost, before)
@@ -113,4 +116,37 @@ test('product references use the category and retry local collisions', () => {
   const fillRandom = bytes => bytes.fill(attempt++)
   assert.equal(generateProductCode('Beverage', [{ code: 'bev-aaaaaaaa' }], fillRandom), 'BEV-BBBBBBBB')
   assert.equal(attempt, 2)
+})
+
+test('sale numbers retry collisions and exhaust the date range', () => {
+  const sales = [{ id: 'a', number: '20261028-000' }, { id: 'b', number: '20261028-001' }]
+  assert.equal(nextSaleNumber(sales, '2026-10-28', () => 0), '20261028-002')
+  assert.equal(nextSaleNumber(sales, '2026-10-29', () => 0), '20261029-000')
+  assert.equal(nextSaleNumber(sales, '2026-10-28', () => 0, 'a'), '20261028-000')
+  const full = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), number: `20261028-${String(i).padStart(3, '0')}` }))
+  assert.throws(() => nextSaleNumber(full, '2026-10-28', () => 0), /1 000/)
+})
+
+test('multi-line sales total historical cost and allow negative stock', () => {
+  const state = sampleState()
+  state.products.push({ code: 'TEST-2', familyId: 'family-1', variant: 'Blanc', format: '75 cl', unitsPerCase: 6 })
+  state.invoices[0].lines.push({ id: 'line-2', productCode: 'TEST-2', cases: 1, casePrice: 600 })
+  state.sales.push({ id: 'sale-2', date: '2026-10-21', number: '20261021-007', customerId: null,
+    status: 'Confirmée/Vendue', lines: [
+      { id: 's1', productCode: 'TEST-1', quantity: 7, unitPrice: 800 },
+      { id: 's2', productCode: 'TEST-2', quantity: 2, unitPrice: 250 },
+    ] })
+  const report = derive(state)
+  assert.equal(report.sales[0].revenue, 6100)
+  assert.equal(report.sales[0].cost, 3700)
+  assert.equal(report.sales[0].profit, 2400)
+  assert.equal(report.products[0].stock, -1)
+  assert.equal(report.products[1].stock, 4)
+  assert.equal(report.totals.unitsSold, 9)
+  assert.equal(reportRows('ventes', state).length, 3)
+  assert.equal(selectedTableRows('ventes', report.sales, [{ id: 'date', header: 'Date' }]).length, 3)
+  state.invoices.push({ id: 'invoice-later', date: '2026-10-22', supplierId: null, purchaseOrderId: null,
+    lines: [{ id: 'later', productCode: 'TEST-1', cases: 1, casePrice: 9000 }] })
+  assert.equal(derive(state).sales[0].cost, 3700)
+  assert.ok(normalizeState(state))
 })
