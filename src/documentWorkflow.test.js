@@ -15,13 +15,18 @@ test('purchase order transitions require the corresponding action', () => {
 })
 
 test('sale actions advance status and allow reopening', () => {
-  assert.equal(saleStatusForAction('En attente', 'save'), 'En attente')
-  assert.equal(saleStatusForAction('En attente', 'sell'), 'Confirmée/Vendue')
-  assert.equal(saleStatusForAction('En attente', 'cancel'), null)
+  assert.equal(saleStatusForAction('À classer', 'save'), null)
+  assert.equal(saleStatusForAction('À classer', 'order'), 'Commande')
+  assert.equal(saleStatusForAction('À classer', 'credit'), 'À crédit')
+  assert.equal(saleStatusForAction('Commande', 'save'), 'Commande')
+  assert.equal(saleStatusForAction('Commande', 'sell'), 'Confirmée/Vendue')
+  assert.equal(saleStatusForAction('Commande', 'credit'), 'À crédit')
+  assert.equal(saleStatusForAction('Commande', 'cancel'), 'Annulée')
   assert.equal(saleStatusForAction('Confirmée/Vendue', 'save'), 'Confirmée/Vendue')
   assert.equal(saleStatusForAction('Confirmée/Vendue', 'cancel'), 'Annulée')
-  assert.equal(saleStatusForAction('Confirmée/Vendue', 'reopen'), 'En attente')
-  assert.equal(saleStatusForAction('Annulée', 'reopen'), 'En attente')
+  assert.equal(saleStatusForAction('Confirmée/Vendue', 'reopen'), 'Commande')
+  assert.equal(saleStatusForAction('Annulée', 'reopen'), 'Commande')
+  assert.equal(saleStatusForAction('À crédit', 'reopen'), 'Commande')
   assert.equal(saleStatusForAction('Annulée', 'sell'), null)
 })
 

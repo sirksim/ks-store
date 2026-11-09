@@ -1,4 +1,4 @@
-import { derive, normalizeState, saleLines, saleNumber } from '../src/data.js'
+import { derive, normalizeState, saleLines, saleNumber, isDeliveredSale, validSalePayments, amountPaid, saleTotal } from '../src/data.js'
 
 const COLLECTIONS = ['families', 'products', 'invoices', 'suppliers', 'customers', 'purchaseOrders', 'sales', 'expenses']
 const idFor = (kind, row) => kind === 'products' ? row.code : row.id
@@ -9,12 +9,14 @@ function invalidReference({ kind, id, payload, deleted }, state) {
   if (kind === 'invoices') {
     const invoices = deleted ? state.invoices.filter(row => row.id !== id) : [...state.invoices.filter(row => row.id !== id), payload]
     const receipts = derive({ ...state, invoices }).receipts
-    if (state.sales.some(sale => sale.status === 'Confirmée/Vendue' && saleLines(sale).some(line =>
+    if (state.sales.some(sale => isDeliveredSale(sale) && saleLines(sale).some(line =>
       !receipts.some(receipt => receipt.productCode === line.productCode && receipt.date <= sale.date))))
       return 'Cette réception est nécessaire à une vente confirmée.'
   }
   if (kind === 'settings' && deleted) return 'Les paramètres ne peuvent pas être supprimés.'
   if (deleted) {
+    if (kind === 'sales' && state.sales.find(row => row.id === id)?.payments?.length)
+      return 'Résous les paiements enregistrés avant de supprimer cette vente.'
     if (kind === 'families' && state.products.some(row => row.familyId === id)) return 'Cette fiche contient encore des variantes.'
     if (kind === 'products' && (state.invoices.some(row => row.lines?.some(line => line.productCode === id)) ||
       state.purchaseOrders.some(row => row.lines?.some(line => line.productCode === id)) || state.sales.some(row => saleLines(row).some(line => line.productCode === id)))) return 'Ce produit est utilisé par une opération.'
@@ -35,7 +37,18 @@ function invalidReference({ kind, id, payload, deleted }, state) {
     (!/^\d{8}-\d{3}$/.test(payload.number || '') ||
       payload.number.slice(0, 8) !== String(payload.date || '').replaceAll('-', ''))) return 'Numéro de vente invalide.'
   if (kind === 'sales' && state.sales.some(row => row.id !== id && saleNumber(row) === payload.number)) return 'Ce numéro de vente existe déjà.'
-  if (kind === 'sales' && payload.status === 'Confirmée/Vendue' && saleLines(payload).some(line =>
+  const previousSale = kind === 'sales' ? state.sales.find(row => row.id === id) : null
+  if (kind === 'sales' && payload.status === 'À classer' && previousSale?.status !== 'À classer')
+    return 'Une nouvelle vente doit être classée comme commande ou crédit.'
+  if (previousSale?.payments?.length && (
+    JSON.stringify(payload.payments?.slice(0, previousSale.payments.length)) !== JSON.stringify(previousSale.payments) ||
+    Math.abs(saleTotal(payload) - saleTotal(previousSale)) > 0.000001 || !isDeliveredSale(payload)))
+    return 'L’historique des paiements et le total de la vente ne peuvent pas être modifiés.'
+  if (previousSale?.status === 'À crédit' && payload.status === 'Confirmée/Vendue' && amountPaid(payload) < saleTotal(payload))
+    return 'La vente à crédit doit être entièrement payée avant d’être marquée vendue.'
+  if (kind === 'sales' && (!['Commande', 'À classer', 'À crédit', 'Confirmée/Vendue', 'Annulée'].includes(payload.status) ||
+    !validSalePayments(payload))) return 'Statut ou paiements de vente invalides.'
+  if (kind === 'sales' && isDeliveredSale(payload) && saleLines(payload).some(line =>
     !derive(state).receipts.some(receipt => receipt.productCode === line.productCode && receipt.date <= payload.date)))
     return 'Réception manquante à la date de cette vente.'
   return null

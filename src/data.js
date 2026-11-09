@@ -21,6 +21,23 @@ export const saleLines = sale => Array.isArray(sale.lines) ? sale.lines : [{
   id: `legacy-${sale.id}`, productCode: sale.productCode, quantity: sale.quantity, unitPrice: sale.unitPrice,
 }]
 export const saleNumber = sale => sale.number || `LEGACY-${sale.id}`
+export const isDeliveredSale = sale => ['À crédit', 'Confirmée/Vendue'].includes(sale.status)
+export const saleTotal = sale => saleLines(sale).reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitPrice), 0)
+export const amountPaid = sale => sale.payments === undefined && sale.status === 'Confirmée/Vendue'
+  ? saleTotal(sale) : (sale.payments || []).reduce((sum, payment) => sum + Number(payment.amount), 0)
+export const balanceDue = sale => sale.status === 'À crédit' ? Math.max(0, saleTotal(sale) - amountPaid(sale)) : 0
+export function validSalePayments(sale) {
+  if (!['Commande', 'À classer', 'À crédit', 'Confirmée/Vendue', 'Annulée'].includes(sale.status)) return false
+  const payments = sale.payments || []
+  if (!Array.isArray(payments) || payments.some(payment => !object(payment) || !identifier(payment.id) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(payment.date || '') || !Number.isFinite(payment.amount) || payment.amount <= 0 ||
+    !identifier(payment.method)) || new Set(payments.map(payment => payment.id)).size !== payments.length) return false
+  const paid = amountPaid(sale)
+  if (paid > saleTotal(sale) + 0.000001) return false
+  if (sale.status === 'À crédit') return Boolean(sale.customerId) && paid < saleTotal(sale)
+  if (sale.status === 'Commande' || sale.status === 'À classer') return paid === 0
+  return true
+}
 export function nextSaleNumber(sales, date, random = Math.random, excludeId = null) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Date de vente invalide.')
   const prefix = date.replaceAll('-', '')
@@ -95,7 +112,10 @@ const validRows = (rows, key) => rows.every(row => object(row) && identifier(row
   new Set(rows.map(row => row[key])).size === rows.length
 
 export function normalizeState(saved) {
-  if (!object(saved) || Object.keys(saved).sort().join('|') !== [...collections, 'settings'].sort().join('|') ||
+  if (!object(saved)) return null
+  saved = { ...saved, sales: Array.isArray(saved.sales) ? saved.sales.map(sale =>
+    object(sale) && sale.status === 'En attente' ? { ...sale, status: 'À classer' } : sale) : saved.sales }
+  if (Object.keys(saved).sort().join('|') !== [...collections, 'settings'].sort().join('|') ||
     !collections.every(kind => Array.isArray(saved[kind])) || !object(saved.settings) ||
     !Number.isFinite(saved.settings.margin) || !Number.isFinite(saved.settings.priceStep) || saved.settings.priceStep <= 0 ||
     !collections.every(kind => validRows(saved[kind], kind === 'products' ? 'code' : 'id'))) return null
@@ -112,7 +132,7 @@ export function normalizeState(saved) {
       row.lines.some(line => !object(line) || !identifier(line.id) || !products.has(line.productCode))) ||
     saved.purchaseOrders.some(row => !Array.isArray(row.lines) || (row.supplierId && !suppliers.has(row.supplierId)) ||
       row.lines.some(line => !object(line) || !identifier(line.id) || !products.has(line.productCode))) ||
-    saved.sales.some(row => !Object.hasOwn(row, 'customerId') ||
+    saved.sales.some(row => !Object.hasOwn(row, 'customerId') || !validSalePayments(row) ||
       (row.customerId && !customers.has(row.customerId)) || !saleLines(row).length ||
       saleLines(row).some(line => !products.has(line.productCode) || !Number.isInteger(Number(line.quantity)) ||
         Number(line.quantity) < 1 || !Number.isFinite(Number(line.unitPrice)) || Number(line.unitPrice) <= 0)) ||
@@ -240,7 +260,7 @@ export function derive(state) {
     const profit = revenue - cost
     const margin = revenue ? profit / revenue * 100 : 0
     const validCost = Boolean(unitsAtDate)
-    if (sale.status === 'Confirmée/Vendue' && product && validCost) {
+    if (isDeliveredSale(sale) && product && validCost) {
       const row = rowMap.get(product.code)
       row.sold += quantity
       row.profit += profit
@@ -252,12 +272,13 @@ export function derive(state) {
     const cost = lines.reduce((sum, line) => sum + line.cost, 0)
     const profit = revenue - cost
     return { ...sale, number: saleNumber(sale), lines, customerName: customers.get(sale.customerId)?.name || '',
+      balanceDue: balanceDue(sale), amountPaid: amountPaid(sale),
       quantity: lines.reduce((sum, line) => sum + line.quantity, 0), revenue, cost, profit,
       margin: revenue ? profit / revenue * 100 : 0, validCost: lines.every(line => line.validCost),
       product: lines[0]?.product, productCode: lines[0]?.productCode, unitPrice: lines[0]?.unitPrice,
       unitCost: lines[0]?.unitCost }
   })
-  const confirmed = sales.filter(sale => sale.status === 'Confirmée/Vendue' && sale.validCost && sale.lines.every(line => line.product))
+  const confirmed = sales.filter(sale => isDeliveredSale(sale) && sale.validCost && sale.lines.every(line => line.product))
   const revenue = confirmed.reduce((sum, sale) => sum + sale.revenue, 0)
   const costSold = confirmed.reduce((sum, sale) => sum + sale.cost, 0)
   const grossProfit = confirmed.reduce((sum, sale) => sum + sale.profit, 0)

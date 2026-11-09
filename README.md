@@ -20,7 +20,7 @@ Pour importer le jeu d’essai dans D1 local, utiliser `node scripts/import-loca
 
 `npm run build` produit `dist/`, dont le Worker Pages. Pour un déploiement Git Pages, choisir **Build command** `npm run build` et **Build output directory** `dist`. `.node-version` fixe Node.js 24.15.0. Le fichier `wrangler.toml` sert au développement local ; il ne contient pas de répertoire de déploiement Pages. Configurer les liaisons et variables de production dans le tableau de bord Pages.
 
-1. Créer une base D1, puis appliquer `migrations/0001_initial.sql` avec la console SQL D1 ou `npx wrangler d1 execute <nom-de-la-base> --remote --file=migrations/0001_initial.sql` avec une configuration de production appropriée.
+1. Créer une base D1, puis appliquer `migrations/0001_initial.sql` avec la console SQL D1 ou `npx wrangler d1 execute <nom-de-la-base> --remote --file=migrations/0001_initial.sql` avec une configuration de production appropriée. Sur une base déjà initialisée, appliquer `migrations/0002_customer_order_credit.sql` avant de déployer cette version. Les anciennes ventes en attente apparaîtront comme « À classer » dans Commandes clients et devront être classées individuellement.
 2. Créer un bucket R2. Dans Pages, lier la base sous **`DB`** et le bucket sous **`IMAGES`**. Configurer aussi les liaisons de prévisualisation si elles sont nécessaires.
 3. Protéger `ks.sirksim.xyz/admin/*` par Cloudflare Access. Ajouter dans Pages **`ACCESS_TEAM_DOMAIN`** et **`ACCESS_AUD`** correspondant à l’application Access. Sans ces variables, les routes de gestion refusent l’accès.
 4. Associer le domaine public à Pages, puis vérifier la vitrine, la gestion, une publication de produit et une image.

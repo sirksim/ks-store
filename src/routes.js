@@ -1,6 +1,6 @@
 export const listPaths = {
   overview: '/', products: '/products', suppliers: '/suppliers', purchaseOrders: '/purchase-orders',
-  receipts: '/receipts', customers: '/customers', sales: '/sales', stock: '/stock',
+  receipts: '/receipts', customers: '/customers', sales: '/sales', orders: '/customer-orders', stock: '/stock',
   expenses: '/expenses', reports: '/reports',
 }
 

@@ -47,6 +47,7 @@ test('family, receipt, sale and expense calculations use current data', () => {
   assert.equal(report.sales[0].lines.length, 1)
   assert.equal(report.products[0].stock, 4)
   assert.equal(report.totals.revenue, 1600)
+  assert.equal(report.sales[0].amountPaid, 1600)
   assert.equal(report.totals.net, 500)
   assert.equal(reportRows('receptions', state)[1][2], 'TEST-INV')
 })
@@ -149,4 +150,28 @@ test('multi-line sales total historical cost and allow negative stock', () => {
     lines: [{ id: 'later', productCode: 'TEST-1', cases: 1, casePrice: 9000 }] })
   assert.equal(derive(state).sales[0].cost, 3700)
   assert.ok(normalizeState(state))
+})
+
+test('customer orders do not affect stock while credit sales do and track their balance', () => {
+  const state = sampleState()
+  state.customers.push({ id: 'customer-1', name: 'Client' })
+  const base = { id: 'sale-1', date: '2026-10-21', number: '20261021-001', customerId: 'customer-1',
+    lines: [{ id: 'line-1', productCode: 'TEST-1', quantity: 2, unitPrice: 800 }] }
+  state.sales.push({ ...base, status: 'Commande', payments: [] })
+  assert.equal(derive(state).products[0].stock, 6)
+  assert.equal(derive(state).totals.revenue, 0)
+  state.sales[0] = { ...base, status: 'À crédit', payments: [{ id: 'pay-1', date: '2026-10-21', amount: 400, method: 'Espèces' }] }
+  assert.equal(derive(state).products[0].stock, 4)
+  assert.equal(derive(state).totals.revenue, 1600)
+  assert.equal(derive(state).sales[0].balanceDue, 1200)
+  assert.ok(normalizeState(state))
+  state.sales[0].payments[0].amount = 1601
+  assert.equal(normalizeState(state), null)
+})
+
+test('legacy pending sales require classification', () => {
+  const state = sampleState()
+  state.sales.push({ id: 'old', date: '2026-10-21', number: '20261021-001', customerId: null,
+    status: 'En attente', lines: [{ id: 'line', productCode: 'TEST-1', quantity: 1, unitPrice: 800 }] })
+  assert.equal(normalizeState(state).sales[0].status, 'À classer')
 })
