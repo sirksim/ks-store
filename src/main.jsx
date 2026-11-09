@@ -49,6 +49,8 @@ import {
   nextSaleNumber,
   saleNumber,
   saleLines,
+  saleTotal,
+  isDeliveredSale,
   productName,
   uid,
 } from "./data";
@@ -100,11 +102,12 @@ const navItems = [
   ["receipts", "Réceptions", Truck],
   ["customers", "Clients", Users],
   ["sales", "Ventes", ShoppingBag],
+  ["orders", "Commandes clients", ClipboardList],
   ["stock", "Stock", Boxes],
   ["expenses", "Dépenses", Receipt],
   ["reports", "Rapports", Download],
 ];
-const saleStatusLabel = (status) => ({ "En attente": "Brouillon", "Confirmée/Vendue": "Vendue", "Annulée": "Annulée" })[status] || status;
+const saleStatusLabel = (status) => ({ "En attente": "À classer", "Confirmée/Vendue": "Vendue", "Annulée": "Annulée" })[status] || status;
 const reportTypes = [
   ["synthese", "Synthèse", "Indicateurs du tableau de bord"],
   ["ventes", "Ventes", "Transactions et marges réelles"],
@@ -167,8 +170,10 @@ const defaults = {
     customerId: "",
     client: "",
     lines: [],
-    status: "En attente",
+    status: "Commande",
     payment: "",
+    payments: [],
+    initialPayment: "",
     note: "",
   },
   expense: {
@@ -271,7 +276,7 @@ function App() {
           : page === "saleEditor"
             ? `${route.id ? "Modifier" : "Nouvelle"} vente`
             : page === "saleDetail"
-              ? `Vente ${selectedSale?.number || "introuvable"}`
+            ? `${selectedSale?.status === 'Commande' ? 'Commande' : 'Vente'} ${selectedSale?.number || "introuvable"}`
           : page === "invoiceDetail"
             ? `Facture ${selectedInvoice?.number || "Sans numéro"}`
             : page === "orderDetail"
@@ -282,7 +287,7 @@ function App() {
   const breaksConfirmedSales = (invoices) =>
     data.sales.some(
       (sale) =>
-        sale.status === "Confirmée/Vendue" &&
+        isDeliveredSale(sale) &&
         saleLines(sale).some(line => !derive({ ...data, invoices }).receipts.some(
           receipt => receipt.productCode === line.productCode && receipt.date <= sale.date)),
     );
@@ -1130,7 +1135,8 @@ function App() {
         );
       setData((current) => ({ ...current, invoices: nextInvoices }));
     } else if (type === "sale") {
-      const previousStatus = data.sales.find((row) => row.id === id)?.status || "En attente";
+      const previousSale = data.sales.find((row) => row.id === id);
+      const previousStatus = previousSale?.status || "Commande";
       const nextStatus = saleStatusForAction(previousStatus, action);
       if (!nextStatus) return fail("Cette transition de vente n’est pas autorisée.");
       if (!fields.date) return fail("La date est nécessaire.");
@@ -1143,7 +1149,7 @@ function App() {
         return fail("Choisis un produit, une quantité entière et un prix réel positif pour chaque ligne.");
       if (new Set(lines.map(line => line.productCode)).size !== lines.length)
         return fail("Chaque produit doit apparaître une seule fois.");
-      if (nextStatus === "Confirmée/Vendue" && lines.some(line => !report.receipts.some(
+      if (isDeliveredSale({ status: nextStatus }) && lines.some(line => !report.receipts.some(
         row => row.productCode === line.productCode && row.date <= fields.date)))
         return fail(
           "Ajoute une réception datée au plus tard du jour de la vente pour chaque produit.",
@@ -1155,6 +1161,23 @@ function App() {
         !data.customers.some((row) => row.id === fields.customerId)
       )
         return fail("Choisis un client existant.");
+      if (nextStatus === "À crédit" && !fields.customerId)
+        return fail("Choisis un client existant pour une vente à crédit.");
+      const total = lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+      const previousPayments = previousSale?.payments || [];
+      if (previousPayments.length && Math.abs(total - saleTotal(previousSale)) > 0.001)
+        return fail("Le total d'une vente avec paiements ne peut pas être modifié.");
+      if (['reopen', 'cancel'].includes(action) && previousPayments.length)
+        return fail("Résous les paiements enregistrés avant de rouvrir ou d'annuler cette vente.");
+      let payments = previousSale?.payments;
+      const initialPayment = Number(fields.initialPayment || 0);
+      if (action === 'credit') {
+        if (!Number.isFinite(initialPayment) || initialPayment < 0 || initialPayment >= total)
+          return fail("Le paiement initial doit être inférieur au total de la vente.");
+        if (initialPayment && !fields.payment) return fail("Choisis la méthode du paiement initial.");
+        payments = initialPayment ? [{ id: uid(), date: fields.date, amount: initialPayment, method: fields.payment }] : [];
+      }
+      if (action === 'sell') payments = [{ id: uid(), date: fields.date, amount: total, method: fields.payment || 'Autre' }];
       const sale = {
         id: id || uid(),
         date: fields.date,
@@ -1165,6 +1188,7 @@ function App() {
         lines,
         status: nextStatus,
         payment: fields.payment,
+        ...(payments !== undefined ? { payments } : {}),
         note: fields.note.trim(),
       };
       setData((current) => ({
@@ -1214,7 +1238,26 @@ function App() {
     }
     setNotice("Enregistré sur cet appareil.");
   };
+  const recordSalePayment = (saleId, amount, method, date) => {
+    const sale = report.sales.find(row => row.id === saleId);
+    const value = Number(amount);
+    if (!sale || sale.status !== 'À crédit' || !Number.isFinite(value) || value <= 0 ||
+      value > sale.balanceDue + 0.000001 || !method || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setNotice('Vérifie le montant, la date et la méthode du paiement.');
+      return false;
+    }
+    setData(current => ({ ...current, sales: current.sales.map(row => row.id === saleId ? {
+      ...row, payments: [...(row.payments || []), { id: uid(), date, amount: value, method }],
+      status: Math.abs(sale.balanceDue - value) < 0.000001 ? 'Confirmée/Vendue' : 'À crédit',
+    } : row) }));
+    setNotice('Paiement enregistré.');
+    return true;
+  };
   const remove = (type, item) => {
+    if (type === 'sale' && item.payments?.length) {
+      setNotice('Résous les paiements enregistrés avant de supprimer cette vente.');
+      return false;
+    }
     const familyCodes =
       type === "family"
         ? new Set(
@@ -1572,8 +1615,8 @@ function App() {
                           Voir tout <ArrowUpRight size={15} />
                         </button>
                       </div>
-                      {report.sales.length ? (
-                        [...report.sales]
+                      {report.sales.some(isDeliveredSale) ? (
+                        [...report.sales].filter(isDeliveredSale)
                           .sort((a, b) => b.date.localeCompare(a.date))
                           .slice(0, 5)
                           .map((s) => (
@@ -1901,6 +1944,7 @@ function App() {
               {page === "saleDetail" && (selectedSale ?
                 <SaleDetail sale={selectedSale} canShare={syncStatus === "online" && pendingCount === 0}
                   onBack={backFromDocument} onEdit={() => open("sale", selectedSale)}
+                  onPayment={recordSalePayment}
                   onPrint={() => setPrintSaleId(selectedSale.id)}
                   onDelete={() => { if (remove("sale", selectedSale)) go(pathFor("sales")); }} /> :
                 <section className="panel"><Empty text="Cette vente est introuvable." /></section>)}
@@ -2363,6 +2407,15 @@ function App() {
                   />
                 </section>
               )}
+              {page === "orders" && <section className="panel"><div className="panel-head wrap"><div><h2>Commandes clients</h2>
+                <p>Commandes clients à préparer et anciennes fiches à classer.</p></div>
+                <button className="primary" onClick={() => open('sale')}><Plus size={17}/> Nouvelle commande</button></div>
+                {report.sales.filter(sale => ['Commande', 'À classer'].includes(sale.status)).map(sale =>
+                  <article className="customer-request" key={sale.id}><div className="panel-head wrap"><div><h3>{sale.number} · {saleStatusLabel(sale.status)}</h3>
+                    <p>{sale.customerName || sale.client || 'Client non précisé'} · {sale.date} · {money(sale.revenue)}</p></div>
+                    <AppLink className="secondary" to={pathFor('saleDetail', sale.id)}>{sale.status === 'À classer' ? 'Classer cette fiche' : 'Voir la commande'}</AppLink></div></article>)}
+                {!report.sales.some(sale => ['Commande', 'À classer'].includes(sale.status)) && <Empty text="Aucune commande enregistrée."/>}
+              </section>}
               {page === "sales" && (
                 <section className="panel document-list-panel">
                   <div className="panel-head wrap">
@@ -2379,7 +2432,7 @@ function App() {
                   </div>
                   <DataTable
                     kind="ventes"
-                    data={report.sales}
+                    data={report.sales.filter(sale => !['Commande', 'À classer'].includes(sale.status))}
                     initialSort={[{ id: "date", desc: true }]}
                     emptyText="Aucune vente enregistrée."
                     columns={[
@@ -2448,6 +2501,7 @@ function App() {
                         header: "Statut",
                         cell: ({ row }) => <span className="sale-status-badge">{saleStatusLabel(row.original.status)}</span>,
                       },
+                      { accessorKey: 'balanceDue', header: 'Reste à payer', cell: info => money(info.getValue()) },
                       {
                         id: "actions",
                         header: "",
@@ -3522,7 +3576,7 @@ function PrintableDocument({ document, kind, supplier }) {
       <div className="print-header">
         <div>
           <strong className="print-brand">KS</strong>
-          <h1>{isOrder ? "Bon de commande" : isSale ? "Vente" : "Réception"} {document.number || "Sans numéro"}</h1>
+          <h1>{isOrder ? "Bon de commande" : isSale ? document.status === 'Commande' ? 'Commande client' : 'Vente' : "Réception"} {document.number || "Sans numéro"}</h1>
           <p>Date : {document.date}</p>
           {isSale && <p>Statut : {saleStatusLabel(document.status)}{document.payment ? ` · Paiement : ${document.payment}` : ""}</p>}
         </div>
@@ -3846,9 +3900,7 @@ function ContactDetail({
     onSupplierTabChange(nextTab);
     supplierTabRefs.current[nextTab]?.focus();
   };
-  const confirmedSales = sales.filter(
-    (sale) => sale.status === "Confirmée/Vendue",
-  );
+  const confirmedSales = sales.filter(isDeliveredSale);
   const confirmedRevenue = confirmedSales.reduce(
     (sum, sale) => sum + sale.revenue,
     0,
@@ -4113,18 +4165,18 @@ function ContactDetail({
               <strong>{money(confirmedRevenue)}</strong>
             </div>
             <div>
-              <span>Autres statuts</span>
-              <strong>{sales.length - confirmedSales.length}</strong>
+              <span>Reste à payer</span>
+              <strong>{money(sales.reduce((sum, sale) => sum + sale.balanceDue, 0))}</strong>
             </div>
           </div>
           <section className="panel">
             <div className="panel-head wrap">
               <div>
                 <h2>Ventes</h2>
-                <p>Historique de toutes les ventes liées à ce client.</p>
+                <p>Commandes, ventes et crédits liés à ce client.</p>
               </div>
               <button type="button" className="primary" onClick={onNewSale}>
-                <Plus size={16} /> Nouvelle vente
+                <Plus size={16} /> Nouvelle commande
               </button>
             </div>
             {sortedSales.length ? (
@@ -4140,7 +4192,7 @@ function ContactDetail({
                     </small>
                   </div>
                   <div className="contact-history-actions">
-                    <b>{money(sale.revenue)}</b>
+                    <b>{money(sale.revenue)}{sale.balanceDue > 0 && <small> · dû : {money(sale.balanceDue)}</small>}</b>
                     <button
                       type="button"
                       className="icon-button"
@@ -4162,20 +4214,34 @@ function ContactDetail({
   );
 }
 
-function SaleDetail({ sale, canShare, onBack, onEdit, onPrint, onDelete }) {
+function SaleDetail({ sale, canShare, onBack, onEdit, onPrint, onDelete, onPayment }) {
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentDate, setPaymentDate] = useState(today());
   return <div className="document-page document-workspace sale-document">
     <button type="button" className="text-button product-back" onClick={onBack}>← Retour</button>
     <section className="panel">
-      <div className="panel-head wrap"><div><span className="eyebrow">VENTE</span><h2>{sale.number}</h2><p>{sale.date} · {saleStatusLabel(sale.status)}</p></div>
+      <div className="panel-head wrap"><div><span className="eyebrow">{sale.status === 'Commande' ? 'COMMANDE CLIENT' : 'VENTE'}</span><h2>{sale.number}</h2><p>{sale.date} · {saleStatusLabel(sale.status)}</p></div>
         <div className="entry-actions"><button type="button" className="secondary" onClick={onPrint}><Printer size={16}/> Imprimer</button>
           <button type="button" className="secondary" onClick={onEdit}><Pencil size={16}/> Modifier</button>
           <ShareActions kind="sale" id={sale.id} canShare={canShare}/>
           <button type="button" className="icon-button danger" aria-label="Supprimer la vente" onClick={onDelete}><Trash2 size={16}/></button></div></div>
       <div className="document-facts"><div><span>Client</span><strong>{sale.customerName || sale.client || "Non précisé"}</strong></div>
         <div><span>Commande</span><strong>{sale.order || "—"}</strong></div><div><span>Paiement</span><strong>{sale.payment || "—"}</strong></div>
-        <div><span>Total</span><strong>{money(sale.revenue)}</strong></div></div>
+        <div><span>Total</span><strong>{money(sale.revenue)}</strong></div>
+        {['À crédit', 'Confirmée/Vendue'].includes(sale.status) && <><div><span>Payé</span><strong>{money(sale.amountPaid)}</strong></div><div><span>Reste à payer</span><strong>{money(sale.balanceDue)}</strong></div></>}</div>
       {sale.note && <p className="document-note"><strong>Notes :</strong> {sale.note}</p>}
     </section>
+    {['À crédit', 'Confirmée/Vendue'].includes(sale.status) && <section className="panel"><h3>Paiements</h3>
+      {(sale.payments || []).length ? <ul>{sale.payments.map(payment => <li key={payment.id}>{payment.date} · {payment.method} · {money(payment.amount)}</li>)}</ul>
+        : <p>{sale.status === 'Confirmée/Vendue' ? 'Vente antérieure enregistrée comme payée.' : 'Aucun paiement enregistré.'}</p>}
+      {sale.status === 'À crédit' && <form onSubmit={event => { event.preventDefault(); if (onPayment(sale.id, paymentAmount, paymentMethod, paymentDate)) setPaymentAmount(''); }}>
+        <div className="document-editor-fields"><Field label="Montant reçu" type="number" min="0.01" max={sale.balanceDue} step="0.01" value={paymentAmount} onChange={setPaymentAmount} required/>
+          <Field label="Date" type="date" value={paymentDate} onChange={setPaymentDate} required/>
+          <SelectField label="Méthode" value={paymentMethod} onChange={setPaymentMethod} options={["", "MonCash", "NatCash", "Espèces", "Virement", "Autre"]}/></div>
+        <button className="primary" type="submit">Enregistrer le paiement</button>
+      </form>}
+    </section>}
     <section className="panel document-items"><div className="panel-head"><h3>Produits vendus</h3></div>
       <div className="document-line-head"><span>Produit</span><span>Unités</span><span>Prix/unité</span><span>Total</span></div>
       {sale.lines.map(line => <div className="document-line" key={line.id}><div><strong>{line.product ? productName(line.product) : line.productCode}</strong><small>{line.productCode}</small></div>
@@ -4202,7 +4268,7 @@ function SaleEditor({ fields, error, catalog, customers, onField, onLine, onDele
     setCreateKind(null); setCreateError(""); } catch (cause) { setCreateError(cause.message); } };
   return <form className="document-editor sale-editor" onSubmit={onSave}>
     <section className="panel document-editor-party">
-      <SearchCombobox label="Rechercher un client (facultatif)" value={customerQuery}
+      <SearchCombobox label="Rechercher un client (obligatoire pour crédit)" value={customerQuery}
         onChange={value => { setCustomerQuery(value); if (value !== customers.find(row => row.id === fields.customerId)?.name) onField("customerId", ""); }}
         items={matchingCustomers.slice(0, 8)} itemLabel={row => row.name}
         onPick={row => { onField("customerId", row.id); setCustomerQuery(row.name); }}
@@ -4226,7 +4292,8 @@ function SaleEditor({ fields, error, catalog, customers, onField, onLine, onDele
         <Field key={key} label={label} value={newProduct[key]} onChange={value => setNewProduct(current => ({ ...current, [key]: value }))}/>)}
         <Field label="Unités par caisse" type="number" min="1" step="1" value={newProduct.unitsPerCase} onChange={value => setNewProduct(current => ({ ...current, unitsPerCase: value }))}/></>}</div>
       {createError && <p role="alert" className="form-error">{createError}</p>}<button type="button" className="secondary" onClick={create}>Créer</button></section>}
-    <section className="panel document-editor-info"><div className="document-editor-fields"><Field label="N° commande" value={fields.order} onChange={value => onField("order", value)}/>
+    <section className="panel document-editor-info"><div className="document-editor-fields">
+      <Field label="N° commande" value={fields.order} onChange={value => onField("order", value)}/>
       <Field label="Référence libre" value={fields.client} onChange={value => onField("client", value)}/></div></section>
     <section className="panel receipt-items"><div className="panel-head wrap"><div><h3>Produits vendus</h3><p>Ajoute un produit avec la recherche, puis indique les unités et le prix réel.</p></div><span className="document-editor-count">{fields.lines.length} ligne(s)</span></div>
       <div className="receipt-table-wrap"><table className="receipt-table"><thead><tr><th>Code</th><th>Produit</th><th>Variante</th><th>Format</th><th>Unités</th><th>Prix/unité</th><th>Total ligne</th><th><span className="sr-only">Action</span></th></tr></thead>
@@ -4247,17 +4314,20 @@ function SaleEditor({ fields, error, catalog, customers, onField, onLine, onDele
       </div>
       <datalist id="sale-products">{catalog.flatMap(p => [<option key={p.code} value={p.code}>{productName(p)}</option>, <option key={`n-${p.code}`} value={productName(p)}>{p.code}</option>])}</datalist>
     </section>
-    <section className="panel"><div className="document-editor-fields"><SelectField label="Paiement" value={fields.payment} onChange={value => onField("payment", value)} options={["", "MonCash", "NatCash", "Espèces", "Virement", "Autre"]}/>
+    <section className="panel"><div className="document-editor-fields"><SelectField label="Méthode de paiement" value={fields.payment} onChange={value => onField("payment", value)} options={["", "MonCash", "NatCash", "Espèces", "Virement", "Autre"]}/>
+      {['Commande', 'À classer'].includes(fields.status) && <Field label="Paiements déjà reçus (pour crédit)" type="number" min="0" step="0.01" value={fields.initialPayment || ''} onChange={value => onField('initialPayment', value)}/>}
       <Field label="Livraison / notes" value={fields.note} onChange={value => onField("note", value)}/></div></section>
     <footer className="document-editor-footer">
       <div className="document-editor-footer-fields"><Field label="Date de vente" type="date" value={fields.date} onChange={value => onField("date", value)} required/>
         <Field label="N° vente" value={fields.number} onChange={() => {}} readOnly/></div>
       <div className="document-editor-totals"><span>{fields.lines.length} produit(s) · {fields.lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0)} unité(s)</span><strong>Total vente : {money(fields.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0))}</strong></div>
       {error && <p role="alert" className="form-error">{error}</p>}
-      <div className="document-editor-actions"><button type="button" className="secondary" onClick={onCancel}>Retour</button><button type="submit" value="save" className="secondary">{fields.status === "En attente" ? "Enregistrer le brouillon" : "Enregistrer"}</button>
-        {fields.status === "En attente" && <button type="submit" value="sell" className="primary">Marquer vendue</button>}
-        {fields.status === "Confirmée/Vendue" && <><button type="submit" value="reopen" className="secondary">Repasser en brouillon</button><button type="submit" value="cancel" className="primary">Annuler la vente</button></>}
-        {fields.status === "Annulée" && <button type="submit" value="reopen" className="primary">Rouvrir en brouillon</button>}</div>
+      <div className="document-editor-actions"><button type="button" className="secondary" onClick={onCancel}>Retour</button>
+        {fields.status !== 'À classer' && <button type="submit" value="save" className="secondary">Enregistrer</button>}
+        {fields.status === 'À classer' && <><button type="submit" value="order" className="secondary">Classer comme commande</button><button type="submit" value="credit" className="primary">Classer comme vente à crédit</button></>}
+        {fields.status === 'Commande' && <><button type="submit" value="credit" className="primary">Livrer à crédit</button><button type="submit" value="sell" className="primary">Vendre et payer</button><button type="submit" value="cancel" className="secondary">Annuler la commande</button></>}
+        {['À crédit', 'Confirmée/Vendue'].includes(fields.status) && <><button type="submit" value="reopen" className="secondary">Rouvrir en commande</button><button type="submit" value="cancel" className="secondary">Annuler la vente</button></>}
+        {fields.status === "Annulée" && <button type="submit" value="reopen" className="primary">Rouvrir en commande</button>}</div>
     </footer>
   </form>;
 }

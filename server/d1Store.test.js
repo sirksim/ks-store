@@ -135,10 +135,43 @@ test('an existing legacy sale keeps its stable number through edits', async () =
       sales: [{ id: 'old', date: '2026-10-21', productCode: 'A', quantity: 1, unitPrice: 20,
         customerId: null, status: 'En attente' }], settings: { margin: 30, priceStep: 25 } }
     await store.replace(state)
-    const edited = { ...state.sales[0], number: 'LEGACY-old', lines: [{ id: 'legacy-old', productCode: 'A', quantity: 2, unitPrice: 20 }] }
+    const edited = { ...state.sales[0], status: 'Commande', number: 'LEGACY-old', lines: [{ id: 'legacy-old', productCode: 'A', quantity: 2, unitPrice: 20 }] }
     const apply = baseRevision => store.apply({ opId: crypto.randomUUID(), kind: 'sales', id: 'old', baseRevision, payload: edited })
     assert.equal((await apply(1)).conflict, false)
     assert.equal((await apply(2)).conflict, false)
     assert.equal(derive((await store.snapshot()).state).sales[0].number, 'LEGACY-old')
+  } finally { db.close() }
+})
+
+test('D1 requires a customer and valid payment balance for credit sales', async () => {
+  const db = mockD1()
+  const store = createD1Store(db)
+  const apply = (kind, id, payload) => store.apply({ opId: crypto.randomUUID(), kind, id, payload, baseRevision: 0 })
+  try {
+    await apply('families', 'f', { id: 'f', name: 'Test', category: 'Boisson' })
+    await apply('products', 'A', { code: 'A', familyId: 'f', variant: 'Rouge', format: '75cl', unitsPerCase: 6 })
+    await apply('invoices', 'i', { id: 'i', date: '2026-10-20', supplierId: null, purchaseOrderId: null,
+      lines: [{ id: 'r', productCode: 'A', cases: 1, casePrice: 600 }] })
+    const sale = { id: 'credit', date: '2026-10-21', number: '20261021-001', customerId: null, status: 'À crédit',
+      lines: [{ id: 'l', productCode: 'A', quantity: 1, unitPrice: 200 }], payments: [] }
+    assert.match((await apply('sales', sale.id, sale)).reason, /paiements/)
+    await apply('customers', 'c', { id: 'c', name: 'Client' })
+    assert.equal((await apply('sales', sale.id, { ...sale, customerId: 'c' })).conflict, false)
+    assert.equal(derive((await store.snapshot()).state).sales[0].balanceDue, 200)
+  } finally { db.close() }
+})
+
+test('customer credit migration marks old pending sales for review once', () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec(readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'))
+    db.prepare('INSERT INTO records(kind,id,payload,revision,deleted,op_id) VALUES(?,?,?,?,?,?)')
+      .run('sales', 'old', JSON.stringify({ id: 'old', status: 'En attente' }), 1, 0, 'old-op')
+    const migration = readFileSync(new URL('../migrations/0002_customer_order_credit.sql', import.meta.url), 'utf8')
+    db.exec(migration)
+    db.exec(migration)
+    const row = db.prepare("SELECT payload,revision FROM records WHERE kind='sales' AND id='old'").get()
+    assert.equal(JSON.parse(row.payload).status, 'À classer')
+    assert.equal(row.revision, 2)
   } finally { db.close() }
 })

@@ -67,13 +67,14 @@ export function reportRows(kind, state) {
       const t = report.totals
       return [
         ['Indicateur', 'Valeur'],
-        ['Chiffre d’affaires confirmé (G)', decimal(t.revenue)],
-        ['Coût des ventes confirmées (G)', decimal(t.costSold)],
+        ['Chiffre d’affaires livré (G)', decimal(t.revenue)],
+        ['Coût des ventes livrées (G)', decimal(t.costSold)],
         ['Bénéfice brut réalisé (G)', decimal(t.grossProfit)],
         ['Marge brute réelle (%)', decimal(t.margin)],
         ['Dépenses (G)', decimal(t.expenses)],
         ['Résultat estimé (G)', decimal(t.net)],
-        ['Ventes confirmées', t.confirmedCount],
+        ['Ventes livrées', t.confirmedCount],
+        ['Crédits restant à payer (G)', decimal(report.sales.reduce((sum, sale) => sum + sale.balanceDue, 0))],
         ['Unités vendues', t.unitsSold],
         ['Unités en stock', t.stock],
       ]
@@ -103,11 +104,11 @@ export function reportRows(kind, state) {
       ]
     case 'ventes':
       return [
-        ['Date', 'N° vente', 'N° commande', 'Client', 'Référence libre', 'Code', 'Nom complet', 'Quantité ligne', 'Prix réel/unité (G)', 'Coût unitaire à la date (G)', 'Total ligne (G)', 'Total vente (G)', 'Coût ligne (G)', 'Bénéfice ligne (G)', 'Marge ligne (%)', 'Statut', 'Mode de paiement', 'Notes'],
+        ['Date', 'N° vente', 'N° commande', 'Client', 'Référence libre', 'Code', 'Nom complet', 'Quantité ligne', 'Prix réel/unité (G)', 'Coût unitaire à la date (G)', 'Total ligne (G)', 'Total vente (G)', 'Coût ligne (G)', 'Bénéfice ligne (G)', 'Marge ligne (%)', 'Statut', 'Mode de paiement', 'Payé (G)', 'Reste à payer (G)', 'Notes'],
         ...report.sales.flatMap(s => s.lines.map(line => [s.date, s.number, s.order, s.customerName, s.client, line.productCode,
           line.product ? productName(line.product) : '', line.quantity, decimal(line.unitPrice), line.validCost ? decimal(line.unitCost) : '',
           decimal(line.revenue), decimal(s.revenue), line.validCost ? decimal(line.cost) : '', line.validCost ? decimal(line.profit) : '',
-          line.validCost ? decimal(line.margin) : '', s.status, s.payment, s.note])),
+          line.validCost ? decimal(line.margin) : '', s.status, s.payment, decimal(s.amountPaid), decimal(s.balanceDue), s.note])),
       ]
     case 'fournisseurs':
     case 'clients': {

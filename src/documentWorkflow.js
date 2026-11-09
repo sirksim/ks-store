@@ -9,10 +9,12 @@ export function orderStageForAction(previousStage, action, hasReceipts = false) 
 }
 
 export function saleStatusForAction(previousStatus, action) {
-  if (action === 'save' && ['En attente', 'Confirmée/Vendue', 'Annulée'].includes(previousStatus)) return previousStatus
-  if (action === 'sell' && previousStatus === 'En attente') return 'Confirmée/Vendue'
-  if (action === 'cancel' && previousStatus === 'Confirmée/Vendue') return 'Annulée'
-  if (action === 'reopen' && ['Confirmée/Vendue', 'Annulée'].includes(previousStatus)) return 'En attente'
+  if (action === 'save' && ['Commande', 'À crédit', 'Confirmée/Vendue', 'Annulée'].includes(previousStatus)) return previousStatus
+  if (action === 'order' && previousStatus === 'À classer') return 'Commande'
+  if (action === 'credit' && ['À classer', 'Commande'].includes(previousStatus)) return 'À crédit'
+  if (action === 'sell' && previousStatus === 'Commande') return 'Confirmée/Vendue'
+  if (action === 'cancel' && ['Commande', 'À crédit', 'Confirmée/Vendue'].includes(previousStatus)) return 'Annulée'
+  if (action === 'reopen' && ['À crédit', 'Confirmée/Vendue', 'Annulée'].includes(previousStatus)) return 'Commande'
   return null
 }
 
